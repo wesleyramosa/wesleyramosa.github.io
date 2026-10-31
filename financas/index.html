@@ -712,8 +712,9 @@ function prepararImportacao(txs,nome){
   });
   // nome do dono: o salvo, ou sugere quem aparece em Pix enviado E recebido no mesmo extrato
   const nomeDe=r=>semAcento(r.desc).replace(/cp\s*:\s*[\d.\/-]+\s*-?/g,'').replace(/^[\d.\/-]+\s*/,'').trim();
-  const env=new Set(linhas.filter(r=>/^pix enviado$/i.test(r.tipo.trim())).map(nomeDe)),rec=linhas.filter(r=>/^pix recebido$/i.test(r.tipo.trim())).map(nomeDe);
-  const sugestao=(db.config.meusNomes||[])[0]||rec.find(n=>n&&env.has(n))||'';
+  const env=new Set(linhas.filter(r=>/^pix enviado$/i.test(r.tipo.trim())).map(nomeDe)),rec=linhas.filter(r=>/^pix recebido$/i.test(r.tipo.trim()));
+  const achado=rec.find(r=>nomeDe(r)&&env.has(nomeDe(r)));
+  const sugestao=(db.config.meusNomes||[])[0]||(achado?achado.desc.replace(/^.*?-(?=[A-Za-zÀ-ú])/,'').replace(/^[\d.\/-]+\s*/,'').trim():'');
   // Pix devolvido + Pix enviado do mesmo valor se anulam: ignora os dois
   linhas.forEach(r=>{if(!/devolvid/i.test(r.tipo)||r.par)return;
     const o=linhas.find(x=>!x.par&&x!==r&&!/devolvid/i.test(x.tipo)&&x.valor===-r.valor&&x.desc===r.desc&&x.data===r.data);
