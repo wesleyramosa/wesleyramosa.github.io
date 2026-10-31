@@ -76,17 +76,25 @@ label.f{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
 .alert{background:#c98a121c;border:1px solid #c98a1244;color:var(--ink);padding:10px 14px;border-radius:10px;margin-bottom:16px;font-size:14px}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#16211c;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
 .toast.on{opacity:1}
+.nuvem{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.nuvem.erro{color:var(--red)}
+.login{max-width:380px;margin:8vh auto 0}
+.login .msg{color:var(--red);font-size:14px;min-height:20px;margin-top:10px}
+.login a{color:var(--brand2);font-size:14px;cursor:pointer}
+body.deslogado nav,body.deslogado #selAno,body.deslogado #selMes{display:none}
 .chartbox{position:relative;height:260px}
 .catbar{display:grid;grid-template-columns:120px 1fr 90px;gap:8px;align-items:center;font-size:13px;margin:5px 0}
 .catbar .bar{margin:0}
 </style>
 </head>
-<body>
+<body class="deslogado">
 <header>
   <div class="top">
     <h1><img src="logo.png" alt="W2A"><span>Finanças ME + Casa</span></h1>
     <select id="selAno" aria-label="Ano"></select>
     <select id="selMes" aria-label="Mês"></select>
+    <span id="nuvem" class="nuvem"></span>
+    <button class="btn sec sm" id="bSair" hidden>Sair</button>
   </div>
   <nav id="nav"></nav>
 </header>
@@ -135,7 +143,81 @@ function migrar(){db.lancs.forEach(l=>{if(l.div&&l.grupo!=='divida'){const d=div
 migrar();
 function save(){
   migrar();
-  try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast('Não foi possível salvar no navegador')}
+  try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){}
+  agendarEnvio();
+}
+
+// ---------- login e salvamento na nuvem ----------
+const API='https://financas-api.cortecerto-app.workers.dev/api';
+let token=localStorage.getItem(KEY+':token')||'';
+let logado=false,envioTimer=0,enviando=false,pendente=false;
+async function api(caminho,opts={}){
+  const r=await fetch(API+caminho,{...opts,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})}});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===401&&token){sairLocal('Sua sessão expirou. Entre de novo.');throw new Error('401')}
+  if(!r.ok)throw new Error(j.erro||'Erro de conexão');
+  return j;
+}
+function nuvem(txt,erro){const el=document.getElementById('nuvem');el.textContent=txt;el.classList.toggle('erro',!!erro)}
+function agendarEnvio(){
+  if(!logado)return;
+  pendente=true;nuvem('Salvando…');clearTimeout(envioTimer);envioTimer=setTimeout(enviar,700);
+}
+async function enviar(){
+  if(enviando){envioTimer=setTimeout(enviar,500);return}
+  enviando=true;pendente=false;
+  try{await api('/dados',{method:'PUT',body:JSON.stringify(db)});if(!pendente)nuvem('☁️ Salvo')}
+  catch(e){if(logado){pendente=true;nuvem('⚠️ Sem conexão — tentando de novo',true);clearTimeout(envioTimer);envioTimer=setTimeout(enviar,8000)}}
+  enviando=false;
+}
+window.addEventListener('beforeunload',e=>{if(pendente){e.preventDefault();e.returnValue=''}});
+async function entrar(){
+  logado=true;document.body.classList.remove('deslogado');bSair.hidden=false;nuvem('Carregando…');
+  try{
+    const d=await api('/dados');
+    if(d&&Array.isArray(d.lancs)){db={lancs:d.lancs,config:d.config||{}};localStorage.setItem(KEY,JSON.stringify(db));nuvem('☁️ Salvo')}
+    else if(db.lancs.length||clientes().length||dividas().length){await enviar();toast('Seus dados deste navegador foram enviados para a nuvem')} // 1º acesso: sobe o que já existia
+    else nuvem('☁️ Salvo');
+  }catch(e){if(!logado)return;nuvem('⚠️ Sem conexão — mostrando a cópia deste aparelho',true)}
+  migrar();montarTopo();render();
+}
+function sairLocal(msg){
+  logado=false;token='';localStorage.removeItem(KEY+':token');localStorage.removeItem(KEY);
+  db={lancs:[],config:{metaFat:7500,metaPessoal:6000,clientes:[]}};pendente=false;clearTimeout(envioTimer);
+  telaLogin(msg);
+}
+bSair.onclick=async()=>{
+  if(pendente){nuvem('Salvando…');await enviar()}
+  if(pendente&&!confirm('Há alterações que ainda não foram salvas na nuvem. Sair mesmo assim?'))return;
+  try{await api('/sair',{method:'POST'})}catch(e){}
+  sairLocal();
+};
+async function telaLogin(msg,modo){
+  logado=false;document.body.classList.add('deslogado');bSair.hidden=true;nuvem('');
+  charts.forEach(c=>c.destroy());charts=[];
+  if(!modo){try{modo=(await api('/status')).temSenha?'entrar':'criar'}catch(e){modo='entrar'}}
+  const criar=modo==='criar';
+  app.innerHTML=`<div class="panel login"><h2>${criar?'Criar senha':'Entrar'}</h2>
+  <p class="sub">${criar?'Use o código de acesso que está no arquivo <b>codigo-de-acesso.txt</b> na pasta financas-dados da sua Área de Trabalho.':'Acesso restrito ao dono do sistema.'}</p>
+  <form id="fLogin">
+    <label class="f">E-mail<input class="in" name="email" type="email" autocomplete="username" required></label>
+    ${criar?`<label class="f">Código de acesso<input class="in" name="codigo" autocomplete="off" required></label>`:''}
+    <label class="f">${criar?'Nova senha (mín. 8 caracteres)':'Senha'}<input class="in" name="senha" type="password" autocomplete="${criar?'new-password':'current-password'}" minlength="${criar?8:1}" required></label>
+    ${criar?`<label class="f">Repita a senha<input class="in" name="senha2" type="password" autocomplete="new-password" required></label>`:''}
+    <button class="btn" style="width:100%;margin-top:16px">${criar?'Criar senha e entrar':'Entrar'}</button>
+    <div class="msg" id="lMsg">${esc(msg||'')}</div>
+  </form>
+  <a id="lTroca">${criar?'Já tenho senha — entrar':'Esqueci a senha / primeiro acesso'}</a></div>`;
+  lTroca.onclick=()=>telaLogin('',criar?'entrar':'criar');
+  fLogin.onsubmit=async e=>{
+    e.preventDefault();const fd=new FormData(fLogin);const b=fLogin.querySelector('button');
+    if(criar&&fd.get('senha')!==fd.get('senha2')){lMsg.textContent='As senhas não conferem.';return}
+    b.disabled=true;lMsg.textContent='';
+    try{
+      const r=await api(criar?'/definir-senha':'/login',{method:'POST',body:JSON.stringify({email:fd.get('email'),senha:fd.get('senha'),codigo:(fd.get('codigo')||'').trim().toUpperCase()})});
+      token=r.token;localStorage.setItem(KEY+':token',token);await entrar();
+    }catch(err){lMsg.textContent=err.message;b.disabled=false}
+  };
 }
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const brl=v=>(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -402,17 +484,17 @@ function anual(){
 
 // ---------- backup ----------
 function backup(){
-  app.innerHTML=`<h2>Backup e configurações</h2><p class="sub">Seus dados ficam salvos <b>somente neste navegador</b>. Exporte um backup de vez em quando e importe no celular/outro computador.</p>
+  app.innerHTML=`<h2>Backup e configurações</h2><p class="sub">Tudo o que você altera é salvo automaticamente na nuvem e aparece em qualquer aparelho em que você entrar. O backup é uma cópia extra de segurança.</p>
   <div class="panel"><h3>Backup</h3><div class="row">
     <button class="btn" id="bExp">⬇️ Exportar backup (.json)</button>
     <label class="btn sec" style="cursor:pointer">⬆️ Importar backup<input type="file" id="bImp" accept=".json,application/json" hidden></label>
     <button class="btn sec" id="bCsv">Exportar CSV (Excel)</button>
-  </div><p class="sub" style="margin-top:10px">Importar <b>substitui</b> os dados atuais deste navegador. ${db.lancs.length} lançamento(s) salvos agora.</p></div>
+  </div><p class="sub" style="margin-top:10px">Importar <b>substitui</b> os dados atuais (também na nuvem). ${db.lancs.length} lançamento(s) salvos agora.</p></div>
   <div class="panel"><h3>Metas</h3>
     <div class="row"><label class="f" style="flex:1">Faturamento mínimo mensal (R$)<input class="in" id="cMeta" value="${String(db.config.metaFat||'').replace('.',',')}"></label>
     <label class="f" style="flex:1">Teto de despesas pessoais/mês (R$)<input class="in" id="cTeto" value="${String(db.config.metaPessoal||'').replace('.',',')}"></label></div>
     <button class="btn" id="cSalvar" style="margin-top:12px">Salvar metas</button></div>
-  <div class="panel"><h3>Zona de perigo</h3><button class="btn danger" id="bZerar">Apagar todos os dados deste navegador</button></div>`;
+  <div class="panel"><h3>Zona de perigo</h3><button class="btn danger" id="bZerar">Apagar todos os dados</button></div>`;
   bExp.onclick=()=>baixar(`financas-backup-${hoje.toISOString().slice(0,10)}.json`,JSON.stringify(db,null,1),'application/json');
   bCsv.onclick=()=>{
     const linhas=[['Grupo','Categoria','Descrição','Mês','Vencimento','Valor','Pago']].concat(db.lancs.map(l=>[GRUPOS[l.grupo]?.nome,l.cat,l.desc,l.mes,l.venc,String(l.valor).replace('.',','),l.pago?'Sim':'Não']));
@@ -431,7 +513,7 @@ function backup(){
     }catch(e){toast('Arquivo inválido')}
   };
   cSalvar.onclick=()=>{const n=s=>parseFloat(String(s).replace(/\./g,'').replace(',','.'))||0;db.config.metaFat=n(cMeta.value);db.config.metaPessoal=n(cTeto.value);save();toast('Metas salvas')};
-  bZerar.onclick=()=>{if(confirm('Apagar TODOS os lançamentos deste navegador? Exporte um backup antes.')){db={lancs:[],config:db.config};save();render()}};
+  bZerar.onclick=()=>{if(confirm('Apagar TODOS os lançamentos (também na nuvem)? Exporte um backup antes.')){db={lancs:[],config:db.config};save();render()}};
 }
 function baixar(nome,txt,tipo){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:tipo}));a.download=nome;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
@@ -457,12 +539,14 @@ app.addEventListener('click',e=>{
 });
 
 function render(){
+  if(!logado)return;
   montarNav();const r=rota();
   if(r==='painel')painel();else if(GRUPOS[r])lista(r);else if(r==='anual')anual();else if(r==='backup')backup();else painel();
   if(r!=='painel'){charts.forEach(c=>c.destroy());charts=[]}
 }
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});
-montarTopo();render();
+montarTopo();
+if(token)entrar();else telaLogin();
 </script>
 </body>
 </html>
