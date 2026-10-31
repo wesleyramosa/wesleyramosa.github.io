@@ -275,10 +275,10 @@ function montarTopo(){
 selAno.onchange=()=>{ano=+selAno.value;localStorage.setItem(KEY+':ano',ano);render()};
 selMes.onchange=()=>{mes=+selMes.value;localStorage.setItem(KEY+':mes',mes);render()};
 
-const ABAS_EMP=[['painel','Painel'],['entrada','Entradas'],['contador','Contador'],['imposto','Impostos'],['divida','Dívidas'],['empresa','Saídas'],['anual','Visão anual'],['backup','Backup']];
-const ABAS_CASA=[['casa','Painel'],['renda','Renda'],['pessoal','Despesas'],['dividacasa','Dívidas'],['anualcasa','Visão anual'],['backup','Backup']];
-const ROTAS_CASA=ABAS_CASA.map(a=>a[0]).filter(r=>r!=='backup');
-function area(){const r=rota();if(ROTAS_CASA.includes(r))return 'casa';if(r==='backup')return localStorage.getItem(KEY+':area')||'empresa';return 'empresa'}
+const ABAS_EMP=[['painel','Painel'],['entrada','Entradas'],['contador','Contador'],['imposto','Impostos'],['divida','Dívidas'],['empresa','Saídas'],['anual','Visão anual'],['importar','Importar extrato'],['backup','Backup']];
+const ABAS_CASA=[['casa','Painel'],['renda','Renda'],['pessoal','Despesas'],['dividacasa','Dívidas'],['anualcasa','Visão anual'],['importar','Importar extrato'],['backup','Backup']];
+const ROTAS_CASA=ABAS_CASA.map(a=>a[0]).filter(r=>r!=='backup'&&r!=='importar');
+function area(){const r=rota();if(ROTAS_CASA.includes(r))return 'casa';if(r==='backup'||r==='importar')return localStorage.getItem(KEY+':area')||'empresa';return 'empresa'}
 function rota(){return (location.hash||'#painel').slice(1)}
 function montarNav(){
   const a=area();try{localStorage.setItem(KEY+':area',a)}catch(e){}
@@ -648,8 +648,126 @@ function backup(){
 }
 function baixar(nome,txt,tipo){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:tipo}));a.download=nome;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
+// ---------- importar extrato (PDF do Inter ou OFX) ----------
+// O arquivo é lido aqui no navegador; nada é enviado para servidor além dos lançamentos criados.
+// Regras aprendidas ficam em config.regras: {chave do estabelecimento: "grupo|categoria" ou "ignorar"}
+const MESES_N={janeiro:1,fevereiro:2,marco:3,'março':3,abril:4,maio:5,junho:6,julho:7,agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
+const regras=()=>db.config.regras||(db.config.regras={});
+const semAcento=t=>String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+const chaveDesc=(tipo,desc)=>semAcento(tipo).replace(/[^a-z]/g,'')+'|'+semAcento(desc).replace(/cp\s*:\s*[\d.\/-]+\s*-?/g,'').replace(/no estabelecimento/g,'').replace(/[^a-z]/g,'');
+let importacao=null;
+function carregarScript(src){return new Promise((ok,erro)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=erro;document.head.appendChild(s)})}
+async function lerPdf(file){
+  if(!window.pdfjsLib){
+    await carregarScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+  const linhas=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    const tc=await (await pdf.getPage(p)).getTextContent();
+    const porY=new Map();
+    tc.items.forEach(it=>{if(!it.str.trim())return;const y=Math.round(it.transform[5]/3);if(!porY.has(y))porY.set(y,[]);porY.get(y).push(it)});
+    [...porY.entries()].sort((a,b)=>b[0]-a[0]).forEach(([,its])=>linhas.push(its.sort((a,b)=>a.transform[4]-b.transform[4]).map(i=>i.str).join(' ').replace(/\s+/g,' ').trim()));
+  }
+  return extrairInter(linhas);
+}
+function extrairInter(linhas){
+  const ls=[];// junta descrição quebrada em duas linhas (aspas abertas)
+  linhas.forEach(l=>{const u=ls[ls.length-1];if(u&&(u.split('"').length-1)%2===1)ls[ls.length-1]=u+' '+l;else ls.push(l)});
+  const reData=/(\d{1,2}) de ([A-Za-zçÇ]+) de (\d{4})/,reTx=/^(.*?)(?::\s*"(.*)")?\s*(-?)\s*R\$\s*([\d.]+,\d{2})\s+-?\s*R\$\s*[\d.]+,\d{2}$/;
+  let data='';const out=[];
+  ls.forEach(l=>{
+    const d=l.match(reData);
+    if(d&&/saldo do dia/i.test(l)){const m=MESES_N[semAcento(d[2])]||MESES_N[d[2].toLowerCase()];if(m)data=`${d[3]}-${String(m).padStart(2,'0')}-${d[1].padStart(2,'0')}`;return}
+    const t=l.match(reTx);if(!t||!data||/^saldo/i.test(t[1].trim()))return;
+    out.push({data,tipo:t[1].trim(),desc:(t[2]||'').replace(/\s+/g,' ').trim(),valor:parseFloat(t[4].replace(/\./g,'').replace(',','.'))*(t[3]?-1:1)});
+  });
+  return out;
+}
+function lerOfx(txt){
+  return [...txt.matchAll(/<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>)/gi)].map(m=>{
+    const g=k=>((m[1].match(new RegExp('<'+k+'>([^<\\r\\n]*)','i'))||[])[1]||'').trim();const d=g('DTPOSTED');
+    return {data:`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`,tipo:g('TRNTYPE'),desc:g('MEMO')||g('NAME'),valor:parseFloat(g('TRNAMT').replace(',','.'))};
+  }).filter(t=>/^\d{4}-\d\d-\d\d$/.test(t.data)&&!isNaN(t.valor));
+}
+function prepararImportacao(txs,nome){
+  const jaImportados=new Set(db.lancs.map(l=>l.imp).filter(Boolean)),cont={};
+  const linhas=txs.map(t=>{
+    const base=`${t.data}|${t.valor}|${semAcento(t.tipo+t.desc).replace(/[^a-z0-9]/g,'')}`;cont[base]=(cont[base]||0)+1;
+    const id=base+'#'+cont[base],chave=chaveDesc(t.tipo,t.desc),regra=regras()[chave]||'';
+    return {...t,id,chave,escolha:regra,auto:!!regra,ja:jaImportados.has(id),feito:false,par:false};
+  });
+  // Pix devolvido + Pix enviado do mesmo valor se anulam: ignora os dois
+  linhas.forEach(r=>{if(!/devolvid/i.test(r.tipo)||r.par)return;
+    const o=linhas.find(x=>!x.par&&x!==r&&!/devolvid/i.test(x.tipo)&&x.valor===-r.valor&&x.desc===r.desc&&x.data===r.data);
+    if(o){[r,o].forEach(x=>{x.par=true;if(!x.ja)x.escolha='ignorar'})}});
+  importacao={nome,linhas};
+}
+const ROTULO_ESC=v=>{if(v==='ignorar')return 'Ignorar';const [g,c]=v.split('|');return `${GRUPOS[g]?.nome||g} → ${c}`};
+function opcoesImport(sel){
+  const grupos=[['🏢',['entrada','contador','imposto','empresa']],['🏠',['renda','pessoal']]];
+  let h=`<option value="">— escolha a categoria —</option><option value="ignorar" ${sel==='ignorar'?'selected':''}>🚫 Ignorar (não lançar)</option>`;
+  grupos.forEach(([ic,gs])=>gs.forEach(g=>{h+=`<optgroup label="${ic} ${GRUPOS[g].nome}">${catsDe(g).map(c=>{const v=g+'|'+c;return `<option value="${esc(v)}" ${v===sel?'selected':''}>${esc(c)}</option>`}).join('')}</optgroup>`}));
+  return h;
+}
+function importar(){
+  const L=importacao?.linhas||[];
+  const pend=L.filter(r=>!r.ja&&!r.feito);
+  const prontos=pend.filter(r=>r.escolha&&r.escolha!=='ignorar').length,semCat=pend.filter(r=>!r.escolha).length,ign=pend.filter(r=>r.escolha==='ignorar').length;
+  const regrasLista=Object.entries(regras());
+  let h=`<h2>📄 Importar extrato</h2><p class="sub">Envie o PDF do extrato do Inter (ou um arquivo OFX de qualquer banco). Na 1ª vez você escolhe a categoria de cada estabelecimento; nas próximas o app já preenche sozinho.</p>
+  <div class="panel row"><label class="btn" style="cursor:pointer">📎 Escolher extrato (PDF ou OFX)<input type="file" id="fExt" accept=".pdf,.ofx,application/pdf" hidden></label><span class="sub" style="margin:0" id="extMsg">${importacao?esc(importacao.nome)+` · ${L.length} movimentações`:''}</span></div>`;
+  if(importacao){
+    h+=`<div class="cards">
+      <div class="card" style="--c:var(--green)"><div class="lbl">✅ Prontos para lançar</div><div class="val">${prontos}</div><div class="det">com categoria escolhida ou aprendida</div></div>
+      <div class="card" style="--c:var(--amber)"><div class="lbl">❓ Falta categoria</div><div class="val">${semCat}</div><div class="det">escolha uma vez e o app aprende</div></div>
+      <div class="card" style="--c:var(--muted)"><div class="lbl">🚫 Ignorados</div><div class="val">${ign}</div><div class="det">transferências, devoluções…</div></div>
+      <div class="card" style="--c:var(--blue)"><div class="lbl">📌 Já no sistema</div><div class="val">${L.filter(r=>r.ja||r.feito).length}</div><div class="det">não serão lançados de novo</div></div>
+    </div>
+    <div class="row" style="margin-bottom:12px"><button class="btn" id="bLancarImp" ${prontos||ign?'':'disabled style="opacity:.5"'}>Lançar ${prontos} e salvar o que aprendi</button><button class="btn sec" id="bSoFaltam">${importar.soFaltam?'Mostrar todos':'Mostrar só os que faltam categoria'}</button></div>
+    <div class="panel scroll"><table><thead><tr><th>Data</th><th>Movimentação</th><th class="n">Valor</th><th>Lançar como</th></tr></thead><tbody>
+    ${L.map((r,i)=>{if(importar.soFaltam&&(r.escolha||r.ja||r.feito))return '';
+      const fim=r.ja||r.feito;
+      return `<tr style="${fim?'opacity:.45':''}"><td>${fmtData(r.data)}</td><td>${esc(r.desc.replace(/^No estabelecimento /i,'')||r.tipo)}<div style="font-size:12px;color:var(--muted)">${esc(r.tipo)}${r.auto?' · <span class="pos">aprendido ✓</span>':''}${r.par?' · devolvido/estornado':''}</div></td>
+      <td class="n ${r.valor<0?'neg':'pos'}">${brl(r.valor)}</td>
+      <td>${fim?`<span class="pill ok">${r.ja?'já importado':(r.escolha==='ignorar'?'ignorado':'lançado')}</span>`:`<select class="in" data-imp="${i}" style="min-width:220px">${opcoesImport(r.escolha)}</select>`}</td></tr>`}).join('')}
+    </tbody></table></div>`;
+  }
+  h+=`<div class="panel"><h3>O que o app já aprendeu (${regrasLista.length})</h3>${regrasLista.length?regrasLista.sort((a,b)=>(db.config.regrasNome?.[a[0]]||a[0]).localeCompare(db.config.regrasNome?.[b[0]]||b[0])).map(([k,v])=>`<span class="pill pend" style="margin:3px;display:inline-block">${esc(db.config.regrasNome?.[k]||k.split('|')[1]||k.split('|')[0])} → ${esc(ROTULO_ESC(v))} <button class="icon" style="padding:0 2px" data-regra-del="${esc(k)}" title="Esquecer">✕</button></span>`).join(''):'<p class="sub" style="margin:0">Nada ainda. Importe um extrato e escolha as categorias.</p>'}</div>`;
+  app.innerHTML=h;
+  fExt.onchange=async()=>{
+    const f=fExt.files[0];if(!f)return;extMsg.textContent='Lendo o extrato…';
+    try{
+      const txs=/\.ofx$/i.test(f.name)?lerOfx(await f.text()):await lerPdf(f);
+      if(!txs.length){extMsg.textContent='Não encontrei movimentações nesse arquivo.';return}
+      prepararImportacao(txs,f.name);importar.soFaltam=false;importar();
+    }catch(e){extMsg.textContent='Não consegui ler esse arquivo.'}
+  };
+  if(!importacao)return;
+  app.querySelectorAll('[data-imp]').forEach(sel=>sel.onchange=()=>{
+    const r=L[+sel.dataset.imp];r.escolha=sel.value;r.auto=false;
+    // aplica a mesma escolha aos outros iguais deste extrato que ainda não têm categoria
+    L.forEach(x=>{if(x!==r&&x.chave===r.chave&&!x.ja&&!x.feito&&!x.par&&(!x.escolha||x.auto))x.escolha=r.escolha});
+    importar();
+  });
+  bSoFaltam.onclick=()=>{importar.soFaltam=!importar.soFaltam;importar()};
+  bLancarImp.onclick=()=>{
+    let n=0,aprendeu=0;
+    L.forEach(r=>{
+      if(r.ja||r.feito||!r.escolha)return;
+      if(!r.par&&regras()[r.chave]!==r.escolha){regras()[r.chave]=r.escolha;(db.config.regrasNome||(db.config.regrasNome={}))[r.chave]=(r.desc.replace(/^No estabelecimento /i,'')||r.tipo).slice(0,60);aprendeu++}
+      r.feito=true;if(r.escolha==='ignorar')return;
+      const [g,cat]=r.escolha.split('|');
+      db.lancs.push({id:uid(),grupo:g,cat,desc:(r.desc.replace(/^No estabelecimento /i,'')||r.tipo),valor:Math.abs(r.valor),mes:r.data.slice(0,7),venc:r.data,pago:true,imp:r.id});n++;
+    });
+    save();toast(`${n} lançamento(s) criados · ${aprendeu} regra(s) aprendidas`);importar();
+  };
+}
+
 // ---------- ações ----------
 app.addEventListener('click',e=>{
+  const rd=e.target.closest('[data-regra-del]');if(rd){delete regras()[rd.dataset.regraDel];if(db.config.regrasNome)delete db.config.regrasNome[rd.dataset.regraDel];save();render();return}
   const t=e.target.closest('[data-novo],[data-ed],[data-del],[data-pay],[data-dup],[data-cli-novo],[data-cat-del],[data-cli-ed],[data-cli-del],[data-lancar],[data-div-novo],[data-div-ed],[data-div-del],[data-abater]');if(!t)return;
   const div=id=>dividas().find(d=>d.id===id);
   if(t.dataset.divNovo)return formDivida(t.dataset.divNovo);
@@ -682,6 +800,7 @@ function render(){
   else if(GRUPOS[r])lista(r);
   else if(r==='anual'||r==='anualcasa')anual(r==='anualcasa'?'casa':'empresa');
   else if(r==='backup')backup();
+  else if(r==='importar')importar();
   else painel();
   if(r!=='painel'&&r!=='casa'){charts.forEach(c=>c.destroy());charts=[]}
 }
