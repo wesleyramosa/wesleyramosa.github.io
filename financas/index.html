@@ -275,10 +275,14 @@ function rota(){return (location.hash||'#painel').slice(1)}
 function montarNav(){nav.innerHTML=ABAS.map(([k,n])=>`<a href="#${k}" class="${rota()===k?'on':''}">${n}</a>`).join('')}
 
 // ---------- painel ----------
+const rendaDaEmpresa=()=>db.config.rendaDaEmpresa||['Salário'];
+const ehRepasse=l=>l.grupo==='renda'&&rendaDaEmpresa().includes(l.cat);
+// pró-labore em "Saídas da empresa" já aparece como Salário na casa; não conta duas vezes
+const empSemProlabore=l=>l.cat!=='Pró-labore';
 function resumo(f){
   const ent=soma(de('entrada',f)),cont=soma(de('contador',f)),imp=soma(de('imposto',f)),emp=soma(de('empresa',f)),divE=soma(de('divida',f).filter(l=>tipoLanc(l)==='empresa')),divC=soma(de('divida',f).filter(l=>tipoLanc(l)==='casa'));
-  const ren=soma(de('renda',f)),pes=soma(de('pessoal',f));
-  return {ent,cont,imp,emp,divE,divC,ren,pes,resEmp:ent-cont-imp-emp-divE,resCasa:ren-pes-divC};
+  const ren=soma(de('renda',f)),pes=soma(de('pessoal',f)),rep=soma(de('renda',f).filter(ehRepasse)),empOutras=soma(de('empresa',f).filter(empSemProlabore));
+  return {ent,cont,imp,emp,empOutras,divE,divC,ren,rep,pes,resEmp:ent-rep-cont-imp-empOutras-divE,resCasa:ren-pes-divC};
 }
 function painel(){
   const r=resumo(doPeriodo);
@@ -299,7 +303,7 @@ function painel(){
     ${cardTipoDiv('empresa')}
   </div>
   <div class="cards c5">
-    <a class="card" href="#empresa" style="--c:var(--amber)"><div class="lbl">🏢 Resultado da empresa</div><div class="val ${r.resEmp<0?'neg':'pos'}">${brl(r.resEmp)}</div><div class="det">Entradas − contador − impostos − saídas (${brl(r.emp)})${r.divE?` − dívidas (${brl(r.divE)})`:''}</div></a>
+    <a class="card" href="#empresa" style="--c:var(--amber)"><div class="lbl">🏢 Resultado da empresa</div><div class="val ${r.resEmp<0?'neg':'pos'}">${brl(r.resEmp)}</div><div class="det">Entradas ${brl(r.ent)} − para a casa ${brl(r.rep)} − contador − impostos${r.divE?' − dívidas':''}${r.empOutras?` − outras saídas (${brl(r.empOutras)})`:''}</div></a>
     <a class="card" href="#renda" style="--c:var(--brand2)"><div class="lbl">🏠 Saldo da casa</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Renda ${brl(r.ren)} − despesas pessoais${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></a>
     <div class="card" style="--c:var(--green)"><div class="lbl">🎯 Meta de faturamento</div><div class="val">${pctMeta.toFixed(0)}%</div><div class="bar"><i style="width:${pctMeta}%;background:${pctMeta>=100?'var(--green)':'var(--amber)'}"></i></div><div class="det">${brl(r.ent)} de ${brl(meta)}</div></div>
     <a class="card" href="#${pend[0]?.grupo||'painel'}" style="--c:var(--red)"><div class="lbl">⏰ Contas pendentes</div><div class="val">${brl(soma(pend))}</div><div class="det">${pend.length} conta(s) em aberto no período</div></a>
@@ -478,7 +482,7 @@ function form(g,l,pre){
   <label class="f" style="flex:1">Mês de competência<input type="month" name="mes" required value="${l.mes}"></label></div>
   <label class="f">${isRec?'Data prevista':'Vencimento'}<input type="date" name="venc" value="${l.venc||''}"></label>
   <label class="chk"><input type="checkbox" name="pago" ${l.pago?'checked':''}> ${isRec?'Já recebido':'Já pago'}</label>
-  ${novo&&g==='empresa'?`<label class="chk"><input type="checkbox" name="espelho" checked> Se for pró-labore, lançar também como Salário na renda da casa</label>`:''}
+  ${novo&&g==='empresa'?`<label class="chk"><input type="checkbox" name="espelho" checked> Se for pró-labore, lançar também como Salário na renda da casa (conta uma vez só no resultado)</label>`:''}
   ${novo?`<label class="chk"><input type="checkbox" name="repetir"> Repetir nos próximos meses até dezembro</label>`:''}
   <div class="row" style="margin-top:18px"><button class="btn sec" value="cancel" formnovalidate>Cancelar</button><span class="spacer"></span><button class="btn" value="ok">Salvar</button></div>`;
   let catAnterior=frm.cat.value;
@@ -520,8 +524,8 @@ function form(g,l,pre){
 function anual(){
   const tabela=(titulo,blocos,resultado)=>{
     let rows='';const totRes=Array(13).fill(0);
-    blocos.forEach(([g,sinal,soCat])=>{
-      const G=GRUPOS[g];const cats=soCat?[soCat]:[...new Set(catsDe(g).concat(db.lancs.filter(l=>l.grupo===g).map(l=>l.cat)))];
+    blocos.forEach(([g,sinal,soCat,rotulo])=>{
+      const G=GRUPOS[g];const cats=soCat?[].concat(soCat):[...new Set(catsDe(g).concat(db.lancs.filter(l=>l.grupo===g).map(l=>l.cat)))];
       const totG=Array(13).fill(0);
       cats.forEach(c=>{
         const vals=MESES.map((_,i)=>soma(db.lancs.filter(l=>l.grupo===g&&l.cat===c&&l.mes===mk(ano,i+1))));
@@ -529,13 +533,14 @@ function anual(){
         vals.push(t);vals.forEach((v,i)=>{totG[i]+=v;totRes[i]+=sinal*v});
         rows+=`<tr><td>${esc(c)}</td>${vals.map(v=>`<td class="n">${v?brl(v):'—'}</td>`).join('')}</tr>`;
       });
-      rows+=`<tr class="tot"><td>${G.icone} ${G.nome}${soCat?' ('+soCat.toLowerCase()+')':''}</td>${totG.map(v=>`<td class="n">${brl(v)}</td>`).join('')}</tr>`;
+      rows+=`<tr class="tot"><td>${rotulo||G.icone+' '+G.nome+(typeof soCat==='string'?' ('+soCat.toLowerCase()+')':'')}</td>${totG.map(v=>`<td class="n">${brl(v)}</td>`).join('')}</tr>`;
     });
     rows+=`<tr class="tot"><td>${resultado}</td>${totRes.map(v=>`<td class="n ${v<0?'neg':'pos'}">${brl(v)}</td>`).join('')}</tr>`;
     return `<div class="panel scroll"><h3>${titulo}</h3><table class="anual"><thead><tr><th></th>${MESES.map(m=>`<th class="n">${m}</th>`).join('')}<th class="n">Total</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   };
   app.innerHTML=`<h2>Visão anual ${ano}</h2><p class="sub">Mesmo formato da planilha: categorias × meses</p>
-  ${tabela('🏢 Empresa (ME) — fontes de renda',[['entrada',1],['contador',-1],['imposto',-1],['divida',-1,'Empresa'],['empresa',-1]],'Resultado final')}
+  ${tabela('🏢 Empresa (ME) — fontes de renda',[['entrada',1],['renda',-1,rendaDaEmpresa(),'🏠 Para a casa'],['contador',-1],['imposto',-1],['divida',-1,'Empresa'],
+    ['empresa',-1,[...new Set(catsDe('empresa').concat(db.lancs.filter(l=>l.grupo==='empresa').map(l=>l.cat)))].filter(empSemProlabore),'🏢 Outras saídas da empresa']],'Resultado final')}
   ${tabela('🏠 Casa',[['renda',1],['pessoal',-1],['divida',-1,'Casa']],'Resultado do mês')}`;
 }
 
@@ -548,6 +553,8 @@ function backup(){
     <button class="btn sec" id="bCsv">Exportar CSV (Excel)</button>
   </div><p class="sub" style="margin-top:10px">Importar <b>substitui</b> os dados atuais (também na nuvem). ${db.lancs.length} lançamento(s) salvos agora.</p></div>
   <div class="panel"><h3>Categorias que você criou</h3>${Object.entries(db.config.cats||{}).filter(([,v])=>v.length).map(([g,v])=>`<p style="margin:6px 0"><b>${GRUPOS[g]?.nome||g}:</b> ${v.map((c,i)=>`<span class="pill pend" style="margin:2px">${esc(c)} <button class="icon" style="padding:0 2px" data-cat-del="${g}|${i}" title="Remover">✕</button></span>`).join('')}</p>`).join('')||'<p class="sub" style="margin:0">Nenhuma ainda. Para criar, escolha "➕ Cadastrar nova categoria…" no campo Categoria de qualquer lançamento.</p>'}</div>
+  <div class="panel"><h3>O que a casa recebe da empresa</h3><p class="sub" style="margin:0 0 8px">As categorias marcadas da Renda da casa são descontadas do Resultado da empresa.</p>
+    ${catsDe('renda').map(c=>`<label class="chk" style="margin-top:6px"><input type="checkbox" data-rde="${esc(c)}" ${rendaDaEmpresa().includes(c)?'checked':''}> ${esc(c)}</label>`).join('')}</div>
   <div class="panel"><h3>Metas</h3>
     <div class="row"><label class="f" style="flex:1">Faturamento mínimo mensal (R$)<input class="in" id="cMeta" value="${String(db.config.metaFat||'').replace('.',',')}"></label>
     <label class="f" style="flex:1">Teto de despesas pessoais/mês (R$)<input class="in" id="cTeto" value="${String(db.config.metaPessoal||'').replace('.',',')}"></label></div>
@@ -570,6 +577,7 @@ function backup(){
       d.lancs.forEach(l=>l.id=l.id||uid());db={lancs:d.lancs,config:{...db.config,...d.config}};save();montarTopo();toast('Backup importado');location.hash='#painel';
     }catch(e){toast('Arquivo inválido')}
   };
+  app.querySelectorAll('[data-rde]').forEach(cb=>cb.onchange=()=>{db.config.rendaDaEmpresa=[...app.querySelectorAll('[data-rde]:checked')].map(x=>x.dataset.rde);save();toast('Salvo')});
   cSalvar.onclick=()=>{const n=s=>parseFloat(String(s).replace(/\./g,'').replace(',','.'))||0;db.config.metaFat=n(cMeta.value);db.config.metaPessoal=n(cTeto.value);save();toast('Metas salvas')};
   bZerar.onclick=()=>{if(confirm('Apagar TODOS os lançamentos (também na nuvem)? Exporte um backup antes.')){db={lancs:[],config:db.config};save();render()}};
 }
