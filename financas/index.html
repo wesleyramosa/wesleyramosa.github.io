@@ -347,7 +347,7 @@ function form(g,l,pre){
   <label class="f">Descrição<input name="desc" value="${esc(l.desc)}" placeholder="${g==='entrada'?'Ex.: Cliente Fulano — mensalidade':'Opcional'}"></label>
   <div class="row"><label class="f" style="flex:1">Valor (R$)<input name="valor" inputmode="decimal" required value="${l.valor===''?'':String(l.valor).replace('.',',')}" placeholder="0,00"></label>
   <label class="f" style="flex:1">Mês de competência<input type="month" name="mes" required value="${l.mes}"></label></div>
-  <label class="f">${isRec?'Data prevista':'Vencimento'}<input type="date" name="venc" value="${l.venc||''}"></label>>Sim: ${esc(d.nome)}</option>`).join('')}</select></label>`:''}
+  <label class="f">${isRec?'Data prevista':'Vencimento'}<input type="date" name="venc" value="${l.venc||''}"></label>
   <label class="chk"><input type="checkbox" name="pago" ${l.pago?'checked':''}> ${isRec?'Já recebido':'Já pago'}</label>
   ${novo&&g==='empresa'?`<label class="chk"><input type="checkbox" name="espelho" checked> Se for pró-labore, lançar também como Salário na renda da casa</label>`:''}
   ${novo?`<label class="chk"><input type="checkbox" name="repetir"> Repetir nos próximos meses até dezembro</label>`:''}
