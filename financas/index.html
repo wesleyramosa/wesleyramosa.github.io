@@ -28,6 +28,10 @@ select option,select optgroup{background:var(--card);color:var(--ink)}
 nav{display:flex;gap:2px;overflow-x:auto;max-width:1200px;margin:10px auto 0;scrollbar-width:none}
 nav a{color:var(--muted);text-decoration:none;padding:9px 12px;border-radius:8px 8px 0 0;white-space:nowrap;font-size:14px}
 nav a.on{background:var(--bg);color:var(--ink);font-weight:600}
+.area{display:flex;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+.area a{padding:6px 14px;border-radius:7px;color:var(--muted);text-decoration:none;font-size:14px;font-weight:600;white-space:nowrap}
+.area a.on{background:var(--brand2);color:#fff}
+body.deslogado .area{display:none}
 main{max-width:1200px;margin:0 auto;padding:18px 16px 60px}
 h2{font-size:20px;margin:0 0 4px}
 .sub{color:var(--muted);margin:0 0 16px;font-size:14px}
@@ -95,6 +99,7 @@ body.deslogado nav,body.deslogado #selAno,body.deslogado #selMes{display:none}
 <header>
   <div class="top">
     <h1><img src="logo.png" alt="W2A"><span>Finanças ME + Casa</span></h1>
+    <div class="area" id="areaSw"></div>
     <select id="selAno" aria-label="Ano"></select>
     <select id="selMes" aria-label="Mês"></select>
     <span id="nuvem" class="nuvem"></span>
@@ -270,9 +275,16 @@ function montarTopo(){
 selAno.onchange=()=>{ano=+selAno.value;localStorage.setItem(KEY+':ano',ano);render()};
 selMes.onchange=()=>{mes=+selMes.value;localStorage.setItem(KEY+':mes',mes);render()};
 
-const ABAS=[['painel','Painel'],['entrada','Entradas'],['pessoal','Despesas pessoais'],['contador','Contador'],['imposto','Impostos'],['divida','Dívidas'],['empresa','Saídas da empresa'],['renda','Renda da casa'],['anual','Visão anual'],['backup','Backup']];
+const ABAS_EMP=[['painel','Painel'],['entrada','Entradas'],['contador','Contador'],['imposto','Impostos'],['divida','Dívidas'],['empresa','Saídas'],['anual','Visão anual'],['backup','Backup']];
+const ABAS_CASA=[['casa','Painel'],['renda','Renda'],['pessoal','Despesas'],['dividacasa','Dívidas'],['anualcasa','Visão anual'],['backup','Backup']];
+const ROTAS_CASA=ABAS_CASA.map(a=>a[0]).filter(r=>r!=='backup');
+function area(){const r=rota();if(ROTAS_CASA.includes(r))return 'casa';if(r==='backup')return localStorage.getItem(KEY+':area')||'empresa';return 'empresa'}
 function rota(){return (location.hash||'#painel').slice(1)}
-function montarNav(){nav.innerHTML=ABAS.map(([k,n])=>`<a href="#${k}" class="${rota()===k?'on':''}">${n}</a>`).join('')}
+function montarNav(){
+  const a=area();try{localStorage.setItem(KEY+':area',a)}catch(e){}
+  areaSw.innerHTML=`<a href="#painel" class="${a==='empresa'?'on':''}">🏢 Empresa</a><a href="#casa" class="${a==='casa'?'on':''}">🏠 Casa</a>`;
+  nav.innerHTML=(a==='casa'?ABAS_CASA:ABAS_EMP).map(([k,n])=>`<a href="#${k}" class="${rota()===k?'on':''}">${n}</a>`).join('');
+}
 
 // ---------- painel ----------
 const rendaDaEmpresa=()=>db.config.rendaDaEmpresa||['Salário'];
@@ -284,38 +296,76 @@ function resumo(f){
   const ren=soma(de('renda',f)),pes=soma(de('pessoal',f)),rep=soma(de('renda',f).filter(ehRepasse)),empOutras=soma(de('empresa',f).filter(empSemProlabore));
   return {ent,cont,imp,emp,empOutras,divE,divC,ren,rep,pes,resEmp:ent-rep-cont-imp-empOutras-divE,resCasa:ren-pes-divC};
 }
+const GRUPOS_EMPRESA=['contador','imposto','empresa'];
+const ehDaEmpresa=l=>GRUPOS_EMPRESA.includes(l.grupo)||(l.grupo==='divida'&&tipoLanc(l)==='empresa');
+const ehDaCasa=l=>l.grupo==='pessoal'||(l.grupo==='divida'&&tipoLanc(l)==='casa');
+function listaPend(pend){
+  return pend.length?`<table>${pend.slice(0,8).map(l=>`<tr><td>${GRUPOS[l.grupo].icone} ${esc(l.desc||l.cat)}<div class="det" style="font-size:12px;color:var(--muted)">${l.venc?'vence '+fmtData(l.venc):'sem vencimento'}</div></td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}">${STATUS_TXT[status(l)]}</button></td></tr>`).join('')}</table>`:'<div class="empty">Nada pendente 🎉</div>';
+}
+const pendentes=f=>db.lancs.filter(l=>doPeriodo(l)&&!l.pago&&f(l)).sort((a,b)=>(a.venc||'9').localeCompare(b.venc||'9'));
+const nomePer=()=>mes?`${MESES_L[mes-1]} de ${ano}`:`Ano de ${ano}`;
 function painel(){
-  const r=resumo(doPeriodo);
-  const per=mes?`${MESES_L[mes-1]} de ${ano}`:`Ano de ${ano}`;
+  const r=resumo(doPeriodo),per=nomePer();
   const meta=(db.config.metaFat||0)*(mes?1:12);
   const pctMeta=meta?Math.min(100,r.ent/meta*100):0;
-  const pend=db.lancs.filter(l=>doPeriodo(l)&&!l.pago&&l.grupo!=='entrada'&&l.grupo!=='renda').sort((a,b)=>(a.venc||'9').localeCompare(b.venc||'9'));
+  const pend=pendentes(ehDaEmpresa);
   const aReceber=db.lancs.filter(l=>doPeriodo(l)&&!l.pago&&l.grupo==='entrada');
   const pctImp=r.ent?(r.imp/r.ent*100):0;
-  let h=`<h2>Painel</h2><p class="sub">${per} · clique em um card para ver e lançar</p>`;
+  let h=`<h2>🏢 Painel da empresa</h2><p class="sub">${per} · clique em um card para ver e lançar</p>`;
   if(!db.lancs.length)h+=`<div class="alert">Nenhum dado ainda. Comece lançando uma entrada, ou vá em <a href="#backup">Backup</a> para importar o arquivo com os dados da sua planilha.</div>`;
   else if(meta&&r.ent<meta)h+=`<div class="alert">⚠️ Faturamento abaixo da meta mínima de ${brl(meta)}. Regra: <b>não ter gasto pessoal antes de pagar carro e casa.</b></div>`;
   h+=`<div class="cards c5">
-    ${card('entrada',r.ent,`${de('entrada').length} lançamento(s)${aReceber.length?` · ${brl(soma(aReceber))} a receber`:''}`)}
-    ${card('pessoal',r.pes,`${pctTxt(r.pes,r.ren)} da renda da casa`)}
+    ${card('entrada',r.ent,`${de('entrada').length} lançamento(s)`)}
+    <a class="card" href="#casa" style="--c:var(--brand2)"><div class="lbl">🏠 Para a casa</div><div class="val">${brl(r.rep)}</div><div class="det">${pctTxt(r.rep,r.ent)} do faturamento</div></a>
     ${card('contador',r.cont,pendTxt('contador'))}
     ${card('imposto',r.imp,`${pctImp.toFixed(1).replace('.',',')}% do faturamento · ${pendTxt('imposto')}`)}
     ${cardTipoDiv('empresa')}
   </div>
   <div class="cards c5">
-    <a class="card" href="#empresa" style="--c:var(--amber)"><div class="lbl">🏢 Resultado da empresa</div><div class="val ${r.resEmp<0?'neg':'pos'}">${brl(r.resEmp)}</div><div class="det">Entradas ${brl(r.ent)} − para a casa ${brl(r.rep)} − contador − impostos${r.divE?' − dívidas':''}${r.empOutras?` − outras saídas (${brl(r.empOutras)})`:''}</div></a>
-    <a class="card" href="#renda" style="--c:var(--brand2)"><div class="lbl">🏠 Saldo da casa</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Renda ${brl(r.ren)} − despesas pessoais${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></a>
+    <a class="card" href="#anual" style="--c:var(--amber)"><div class="lbl">🏢 Resultado da empresa</div><div class="val ${r.resEmp<0?'neg':'pos'}">${brl(r.resEmp)}</div><div class="det">Entradas − para a casa − contador − impostos${r.divE?' − dívidas':''}${r.empOutras?' − outras saídas':''}</div></a>
     <div class="card" style="--c:var(--green)"><div class="lbl">🎯 Meta de faturamento</div><div class="val">${pctMeta.toFixed(0)}%</div><div class="bar"><i style="width:${pctMeta}%;background:${pctMeta>=100?'var(--green)':'var(--amber)'}"></i></div><div class="det">${brl(r.ent)} de ${brl(meta)}</div></div>
-    <a class="card" href="#${pend[0]?.grupo||'painel'}" style="--c:var(--red)"><div class="lbl">⏰ Contas pendentes</div><div class="val">${brl(soma(pend))}</div><div class="det">${pend.length} conta(s) em aberto no período</div></a>
-    ${cardTipoDiv('casa')}
+    <a class="card" href="#entrada" style="--c:var(--green)"><div class="lbl">📥 A receber</div><div class="val">${brl(soma(aReceber))}</div><div class="det">${aReceber.length} mensalidade(s) em aberto</div></a>
+    <a class="card" href="#${pend[0]?.grupo||'painel'}" style="--c:var(--red)"><div class="lbl">⏰ Contas pendentes</div><div class="val">${brl(soma(pend))}</div><div class="det">${pend.length} conta(s) da empresa em aberto</div></a>
+    ${card('empresa',r.empOutras,'Fora o pró-labore')}
   </div>
   <div class="grid2">
-    <div class="panel"><h3>Entradas × saídas — ${ano}</h3><div class="chartbox"><canvas id="ch1"></canvas></div></div>
-    <div class="panel"><h3>Próximas contas a pagar</h3>${pend.length?`<table>${pend.slice(0,8).map(l=>`<tr><td>${GRUPOS[l.grupo].icone} ${esc(l.desc||l.cat)}<div class="det" style="font-size:12px;color:var(--muted)">${l.venc?'vence '+fmtData(l.venc):'sem vencimento'}</div></td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}">${STATUS_TXT[status(l)]}</button></td></tr>`).join('')}</table>`:'<div class="empty">Nada pendente 🎉</div>'}</div>
+    <div class="panel"><h3>Entradas × saídas da empresa — ${ano}</h3><div class="chartbox"><canvas id="ch1"></canvas></div></div>
+    <div class="panel"><h3>Próximas contas da empresa</h3>${listaPend(pend)}</div>
+  </div>`;
+  app.innerHTML=h;
+  graficoAno('empresa');
+}
+function painelCasa(){
+  const r=resumo(doPeriodo),per=nomePer();
+  const pend=pendentes(ehDaCasa);
+  const teto=(db.config.metaPessoal||0)*(mes?1:12),pctTeto=teto?Math.min(100,r.pes/teto*100):0;
+  const por={};de('pessoal').forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
+  const maior=Object.entries(por).sort((a,b)=>b[1]-a[1])[0];
+  const mesesComGasto=new Set(db.lancs.filter(l=>l.grupo==='pessoal'&&l.mes.startsWith(ano+'-')).map(l=>l.mes)).size;
+  const media=mesesComGasto?soma(db.lancs.filter(l=>l.grupo==='pessoal'&&l.mes.startsWith(ano+'-')))/mesesComGasto:0;
+  let h=`<h2>🏠 Painel da casa</h2><p class="sub">${per} · clique em um card para ver e lançar</p>`;
+  if(teto&&r.pes>teto)h+=`<div class="alert">⚠️ As despesas passaram do teto de ${brl(teto)}. Regra: <b>não ter gasto pessoal antes de pagar carro e casa.</b></div>`;
+  h+=`<div class="cards c5">
+    ${card('renda',r.ren,`${brl(r.rep)} vem da empresa`)}
+    ${card('pessoal',r.pes,`${pctTxt(r.pes,r.ren)} da renda · ${pendTxt('pessoal')}`)}
+    ${cardTipoDiv('casa')}
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">💰 Saldo da casa</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Renda − despesas${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></div>
+    <div class="card" style="--c:var(--amber)"><div class="lbl">🧱 Teto de despesas</div><div class="val">${teto?pctTeto.toFixed(0)+'%':'—'}</div><div class="bar"><i style="width:${pctTeto}%;background:${pctTeto>=100?'var(--red)':pctTeto>=85?'var(--amber)':'var(--green)'}"></i></div><div class="det">${teto?`${brl(r.pes)} de ${brl(teto)}`:'Defina o teto em Backup'}</div></div>
+  </div>
+  <div class="cards c5">
+    <a class="card" href="#renda" style="--c:var(--brand2)"><div class="lbl">🏢 Vem da empresa</div><div class="val">${brl(r.rep)}</div><div class="det">Salário / pró-labore</div></a>
+    <a class="card" href="#renda" style="--c:var(--green)"><div class="lbl">🎁 Outras rendas</div><div class="val">${brl(r.ren-r.rep)}</div><div class="det">VR e outras</div></a>
+    <a class="card" href="#${pend[0]?(pend[0].grupo==='divida'?'dividacasa':'pessoal'):'casa'}" style="--c:var(--red)"><div class="lbl">⏰ Contas pendentes</div><div class="val">${brl(soma(pend))}</div><div class="det">${pend.length} conta(s) da casa em aberto</div></a>
+    <a class="card" href="#pessoal" style="--c:var(--red)"><div class="lbl">📈 Maior gasto</div><div class="val">${maior?brl(maior[1]):'—'}</div><div class="det">${maior?esc(maior[0]):'Sem despesas no período'}</div></a>
+    <a class="card" href="#anualcasa" style="--c:var(--purple)"><div class="lbl">📊 Média mensal ${ano}</div><div class="val">${brl(media)}</div><div class="det">de despesas (${mesesComGasto} mês(es) com gastos)</div></a>
+  </div>
+  <div class="grid2">
+    <div class="panel"><h3>Renda × despesas da casa — ${ano}</h3><div class="chartbox"><canvas id="ch1"></canvas></div></div>
+    <div class="panel"><h3>Próximas contas da casa</h3>${listaPend(pend)}</div>
   </div>
   <div class="panel"><h3>Para onde vai o dinheiro da casa — ${per}</h3>${catBars('pessoal')}</div>`;
   app.innerHTML=h;
-  graficoAno();
+  graficoAno('casa');
 }
 function cardTipoDiv(tipo){
   const ini=inicioDoPeriodo(),fim=fimDoPeriodo();
@@ -323,7 +373,7 @@ function cardTipoDiv(tipo){
   const antes=ds.reduce((s,d)=>s+saldoAntes(d,ini),0),noPer=ds.reduce((s,d)=>s+abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),0),depois=antes-noPer;
   const total=ds.reduce((s,d)=>s+d.valor,0),pct=total?Math.min(100,(total-depois)/total*100):0;
   const prox=mes&&mes<12?`${MESES[mes]}/${ano}`:`Jan/${ano+1}`;
-  return `<a class="card" href="#divida" style="--c:var(--red)"><div class="lbl">💳 Dívidas da ${tipo}</div>
+  return `<a class="card" href="#${tipo==='casa'?'dividacasa':'divida'}" style="--c:var(--red)"><div class="lbl">💳 Dívidas da ${tipo}</div>
     <div class="val ${antes?'neg':''}">${brl(antes)}</div><div class="det">${ds.length?`${ds.length} dívida(s) · início ${mes?`de ${MESES[mes-1]}`:'do ano'}`:'Nenhuma dívida'}</div>
     ${ds.length?`<div class="bar"><i style="width:${pct}%"></i></div><div class="det">${noPer?`Abatido <b class="pos">${brl(noPer)}</b> · `:''}${prox} começa com <b>${brl(depois)}</b></div>`:''}</a>`;
 }
@@ -335,7 +385,7 @@ function cardsDividas(filtro){
     const antes=saldoAntes(d,ini),noPer=abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),depois=antes-noPer;
     const pctPago=d.valor?Math.min(100,(d.valor-depois)/d.valor*100):0;
     const prox=mes===12?`Jan/${ano+1}`:mes?`${MESES[mes]}/${ano}`:`Jan/${ano+1}`;
-    return {d,antes,noPer,depois,html:`<a class="card" href="#divida" style="--c:var(--red)"><div class="lbl">💳 ${TIPOS_DIV[tipoDiv(d)]} — ${esc(d.nome)}</div>
+    return {d,antes,noPer,depois,html:`<a class="card" href="#${tipoDiv(d)==='casa'?'dividacasa':'divida'}" style="--c:var(--red)"><div class="lbl">💳 ${TIPOS_DIV[tipoDiv(d)]} — ${esc(d.nome)}</div>
       <div class="val neg">${brl(antes)}</div><div class="det">Saldo no início ${mes?`de ${MESES[mes-1]}`:'do ano'}</div>
       <div class="bar"><i style="width:${pctPago}%"></i></div>
       <div class="det">${noPer?`Abatido: <b class="pos">${brl(noPer)}</b> · `:'Nada abatido ainda · '}${prox} começa com <b>${brl(depois)}</b></div></a>`};
@@ -344,9 +394,9 @@ function cardsDividas(filtro){
   return `<div class="cards">${linhas.map(x=>x.html).join('')}
     ${linhas.length>1?`<div class="card" style="--c:var(--red)"><div class="lbl">💳 Total de dívidas</div><div class="val neg">${brl(totA)}</div><div class="det">Início ${mes?`de ${MESES[mes-1]}`:'do ano'} → fim: <b>${brl(totD)}</b></div></div>`:''}</div>`;
 }
-function painelDividas(){
-  const ds=dividas();
-  return `<div class="panel scroll"><div class="row"><h3 style="margin:0">💳 Dívidas cadastradas</h3><span class="spacer"></span><button class="btn sec sm" data-div-novo="empresa">+ Dívida</button></div>
+function painelDividas(tipo){
+  const ds=dividas().filter(d=>!tipo||tipoDiv(d)===tipo);
+  return `<div class="panel scroll"><div class="row"><h3 style="margin:0">💳 Dívidas da ${tipo||'empresa e da casa'}</h3><span class="spacer"></span><button class="btn sec sm" data-div-novo="${tipo||'empresa'}">+ Dívida</button></div>
   ${ds.length?`<table style="margin-top:8px"><thead><tr><th>Dívida</th><th>Tipo</th><th>Desde</th><th class="n">Valor inicial</th><th class="n">Já abatido</th><th class="n">Saldo atual</th><th></th></tr></thead><tbody>
   ${ds.map(d=>{const pago=abat(d,l=>l.mes>=d.inicio);return `<tr><td>${esc(d.nome)}</td><td>${TIPOS_DIV[tipoDiv(d)]}</td><td>${MESES[+d.inicio.slice(5)-1]}/${d.inicio.slice(0,4)}</td><td class="n">${brl(d.valor)}</td><td class="n pos">${brl(pago)}</td><td class="n neg"><b>${brl(d.valor-pago)}</b></td>
     <td class="n"><button class="btn sm" data-abater="${d.id}">Abater</button> <button class="icon" data-div-ed="${d.id}" title="Editar">✏️</button><button class="icon" data-div-del="${d.id}" title="Remover">🗑️</button></td></tr>`}).join('')}
@@ -380,25 +430,31 @@ function catBars(g){
   const arr=Object.entries(por).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);const max=arr[0][1];
   return arr.map(([c,v])=>`<div class="catbar"><span>${esc(c)}</span><div class="bar"><i style="width:${v/max*100}%;background:var(--red)"></i></div><span class="n" style="text-align:right">${brl(v)} <small style="color:var(--muted)">${(v/tot*100).toFixed(0)}%</small></span></div>`).join('');
 }
-function graficoAno(){
+function graficoAno(a){
   charts.forEach(c=>c.destroy());charts=[];
   const el=document.getElementById('ch1');if(!el||!window.Chart)return;
   const rs=MESES.map((_,i)=>resumo(doMes(ano,i+1)));
   const cor=getComputedStyle(document.body).color;
-  charts.push(new Chart(el,{type:'bar',data:{labels:MESES,datasets:[
-    {label:'Entradas',data:rs.map(r=>r.ent),backgroundColor:'#1a8f5a'},
-    {label:'Contador + impostos',data:rs.map(r=>r.cont+r.imp),backgroundColor:'#7b4fc4'},
-    {label:'Despesas pessoais',data:rs.map(r=>r.pes),backgroundColor:'#c83a3a'},
-  ]},options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:cor,boxWidth:12}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+brl(c.raw)}}},scales:{x:{ticks:{color:cor}},y:{ticks:{color:cor,callback:v=>'R$ '+(v/1000)+'k'}}}}}));
+  const ds=a==='casa'?[
+    {label:'Renda',data:rs.map(r=>r.ren),backgroundColor:'#34a853'},
+    {label:'Despesas',data:rs.map(r=>r.pes),backgroundColor:'#ea4335'},
+    {label:'Dívidas da casa',data:rs.map(r=>r.divC),backgroundColor:'#f2a900'},
+  ]:[
+    {label:'Entradas',data:rs.map(r=>r.ent),backgroundColor:'#34a853'},
+    {label:'Para a casa',data:rs.map(r=>r.rep),backgroundColor:'#4285f4'},
+    {label:'Contador + impostos',data:rs.map(r=>r.cont+r.imp),backgroundColor:'#9b72e0'},
+    {label:'Dívidas da empresa',data:rs.map(r=>r.divE),backgroundColor:'#ea4335'},
+  ];
+  charts.push(new Chart(el,{type:'bar',data:{labels:MESES,datasets:ds},options:{maintainAspectRatio:false,plugins:{legend:{labels:{color:cor,boxWidth:12}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+brl(c.raw)}}},scales:{x:{ticks:{color:cor},grid:{color:'#26292c'}},y:{ticks:{color:cor,callback:v=>'R$ '+(v/1000)+'k'},grid:{color:'#26292c'}}}}}));
 }
 
 // ---------- listas ----------
-function lista(g){
-  const G=GRUPOS[g];const per=mes?`${MESES_L[mes-1]} de ${ano}`:`Ano de ${ano}`;
-  const ls=de(g).sort((a,b)=>b.mes.localeCompare(a.mes)||(a.venc||'').localeCompare(b.venc||''));
+function lista(g,tipo){
+  const G=GRUPOS[g];const per=nomePer();
+  const ls=de(g).filter(l=>!tipo||tipoLanc(l)===tipo).sort((a,b)=>b.mes.localeCompare(a.mes)||(a.venc||'').localeCompare(b.venc||''));
   const tot=soma(ls),pago=soma(ls.filter(l=>l.pago));
   const isRec=g==='entrada'||g==='renda';
-  app.innerHTML=`<div class="row"><div><h2>${G.icone} ${G.nome}</h2><p class="sub">${G.desc} · ${per}</p></div><span class="spacer"></span><button class="btn" data-novo="${g}">+ Novo lançamento</button></div>
+  app.innerHTML=`<div class="row"><div><h2>${G.icone} ${tipo?`Dívidas da ${tipo}`:G.nome}</h2><p class="sub">${tipo?(tipo==='casa'?'Dívidas da casa — o que você paga sai do saldo da casa':'Dívidas da empresa — separadas das contas mensais'):G.desc} · ${per}</p></div><span class="spacer"></span><button class="btn" data-novo="${g}" data-tipo="${tipo||''}">+ Novo lançamento</button></div>
   <div class="cards">
     <div class="card" style="--c:${G.cor}"><div class="lbl">Total no período</div><div class="val">${brl(tot)}</div><div class="det">${ls.length} lançamento(s)</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">${isRec?'Recebido':'Pago'}</div><div class="val pos">${brl(pago)}</div></div>
@@ -409,7 +465,7 @@ function lista(g){
   </tbody></table>`:'<div class="empty">Nenhum lançamento neste período.</div>'}</div>
   ${g==='pessoal'?`<div class="panel"><h3>Por categoria</h3>${catBars('pessoal')}</div>`:''}
   ${g==='entrada'?painelClientes():''}
-  ${g==='divida'?cardsDividas()+painelDividas():''}`;
+  ${g==='divida'?cardsDividas(tipo)+painelDividas(tipo):''}`;
 }
 
 // ---------- clientes (mensalidades) ----------
@@ -521,7 +577,7 @@ function form(g,l,pre){
 }
 
 // ---------- visão anual (igual à planilha) ----------
-function anual(){
+function anual(a){
   const tabela=(titulo,blocos,resultado)=>{
     let rows='';const totRes=Array(13).fill(0);
     blocos.forEach(([g,sinal,soCat,rotulo])=>{
@@ -538,10 +594,9 @@ function anual(){
     rows+=`<tr class="tot"><td>${resultado}</td>${totRes.map(v=>`<td class="n ${v<0?'neg':'pos'}">${brl(v)}</td>`).join('')}</tr>`;
     return `<div class="panel scroll"><h3>${titulo}</h3><table class="anual"><thead><tr><th></th>${MESES.map(m=>`<th class="n">${m}</th>`).join('')}<th class="n">Total</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   };
-  app.innerHTML=`<h2>Visão anual ${ano}</h2><p class="sub">Mesmo formato da planilha: categorias × meses</p>
-  ${tabela('🏢 Empresa (ME) — fontes de renda',[['entrada',1],['renda',-1,rendaDaEmpresa(),'🏠 Para a casa'],['contador',-1],['imposto',-1],['divida',-1,'Empresa'],
-    ['empresa',-1,[...new Set(catsDe('empresa').concat(db.lancs.filter(l=>l.grupo==='empresa').map(l=>l.cat)))].filter(c=>c!=='Pró-labore'),'🏢 Outras saídas da empresa']],'Resultado final')}
-  ${tabela('🏠 Casa',[['renda',1],['pessoal',-1],['divida',-1,'Casa']],'Resultado do mês')}`;
+  app.innerHTML=`<h2>${a==='casa'?'🏠':'🏢'} Visão anual ${ano}</h2><p class="sub">Mesmo formato da planilha: categorias × meses</p>
+  ${a==='casa'?tabela('🏠 Casa',[['renda',1],['pessoal',-1],['divida',-1,'Casa']],'Resultado do mês'):tabela('🏢 Empresa (ME) — fontes de renda',[['entrada',1],['renda',-1,rendaDaEmpresa(),'🏠 Para a casa'],['contador',-1],['imposto',-1],['divida',-1,'Empresa'],
+    ['empresa',-1,[...new Set(catsDe('empresa').concat(db.lancs.filter(l=>l.grupo==='empresa').map(l=>l.cat)))].filter(c=>c!=='Pró-labore'),'🏢 Outras saídas da empresa']],'Resultado final')}`;
 }
 
 // ---------- backup ----------
@@ -597,7 +652,9 @@ app.addEventListener('click',e=>{
   if(t.dataset.cliDel){const c=clientes()[+t.dataset.cliDel];if(confirm(`Remover ${c.nome} da lista de clientes? Os lançamentos já feitos continuam.`)){clientes().splice(+t.dataset.cliDel,1);save();render()}return}
   if(t.dataset.lancar)return lancarMensalidades(t.dataset.lancar);
   const find=id=>db.lancs.find(l=>l.id===id);
-  if(t.dataset.novo)t.dataset.novo==='divida'&&!dividas().length?formDivida('empresa'):form(t.dataset.novo);
+  if(t.dataset.novo){const tp=t.dataset.tipo;
+    if(t.dataset.novo==='divida'){if(!dividas().some(d=>!tp||tipoDiv(d)===tp))formDivida(tp||'empresa');else form('divida',null,tp?{cat:TIPOS_DIV[tp]}:{})}
+    else form(t.dataset.novo)}
   if(t.dataset.ed){const l=find(t.dataset.ed);form(l.grupo,l)}
   if(t.dataset.pay){const l=find(t.dataset.pay);l.pago=!l.pago;save();render()}
   if(t.dataset.dup){const l=find(t.dataset.dup);let [a,m]=l.mes.split('-').map(Number);m++;if(m>12){m=1;a++}
@@ -608,8 +665,14 @@ app.addEventListener('click',e=>{
 function render(){
   if(!logado)return;
   montarNav();const r=rota();
-  if(r==='painel')painel();else if(GRUPOS[r])lista(r);else if(r==='anual')anual();else if(r==='backup')backup();else painel();
-  if(r!=='painel'){charts.forEach(c=>c.destroy());charts=[]}
+  if(r==='casa')painelCasa();
+  else if(r==='dividacasa')lista('divida','casa');
+  else if(r==='divida')lista('divida','empresa');
+  else if(GRUPOS[r])lista(r);
+  else if(r==='anual'||r==='anualcasa')anual(r==='anualcasa'?'casa':'empresa');
+  else if(r==='backup')backup();
+  else painel();
+  if(r!=='painel'&&r!=='casa'){charts.forEach(c=>c.destroy());charts=[]}
 }
 window.addEventListener('hashchange',()=>{render();scrollTo(0,0)});
 montarTopo();
