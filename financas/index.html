@@ -710,13 +710,17 @@ function prepararImportacao(txs,nome){
     const id=base+'#'+cont[base],chave=chaveDesc(t.tipo,t.desc),regra=regras()[chave]||'';
     return {...t,id,chave,escolha:regra,auto:!!regra,ja:jaImportados.has(id),feito:false,par:false};
   });
+  // nome do dono: o salvo, ou sugere quem aparece em Pix enviado E recebido no mesmo extrato
+  const nomeDe=r=>semAcento(r.desc).replace(/cp\s*:\s*[\d.\/-]+\s*-?/g,'').replace(/^[\d.\/-]+\s*/,'').trim();
+  const env=new Set(linhas.filter(r=>/^pix enviado$/i.test(r.tipo.trim())).map(nomeDe)),rec=linhas.filter(r=>/^pix recebido$/i.test(r.tipo.trim())).map(nomeDe);
+  const sugestao=(db.config.meusNomes||[])[0]||rec.find(n=>n&&env.has(n))||'';
   // Pix devolvido + Pix enviado do mesmo valor se anulam: ignora os dois
   linhas.forEach(r=>{if(!/devolvid/i.test(r.tipo)||r.par)return;
     const o=linhas.find(x=>!x.par&&x!==r&&!/devolvid/i.test(x.tipo)&&x.valor===-r.valor&&x.desc===r.desc&&x.data===r.data);
     if(o){[r,o].forEach(x=>{x.par=true;if(!x.ja)x.escolha='ignorar'})}});
   const porMes={};linhas.forEach(r=>porMes[r.data.slice(0,7)]=(porMes[r.data.slice(0,7)]||0)+1);
   const principal=Object.entries(porMes).sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]))[0][0];
-  importacao={nome,linhas,desde:principal+'-01',ate:linhas.reduce((m,r)=>r.data>m?r.data:m,'')};
+  importacao={nome,linhas,meuNome:sugestao,desde:principal+'-01',ate:linhas.reduce((m,r)=>r.data>m?r.data:m,'')};
 }
 const ROTULO_ESC=v=>{if(v==='ignorar')return 'Ignorar';const [g,c]=v.split('|');return `${GRUPOS[g]?.nome||g} → ${c}`};
 function opcoesImport(sel){
@@ -728,6 +732,8 @@ function opcoesImport(sel){
 function importar(){
   const L=importacao?.linhas||[];
   const fora=r=>importacao&&(r.data<importacao.desde||r.data>importacao.ate);
+  const ehEu=r=>{const n=semAcento(importacao?.meuNome||'').replace(/[^a-z]/g,'');return n.length>5&&/^pix/i.test(r.tipo.trim())&&semAcento(r.desc).replace(/[^a-z]/g,'').includes(n)};
+  L.forEach(r=>{const eu=ehEu(r);if(eu&&!r.eu&&!r.ja&&!r.feito){r.eu=true;r.escolha='ignorar';r.auto=false}else if(!eu&&r.eu){r.eu=false;r.escolha=regras()[r.chave]||'';r.auto=!!r.escolha}});
   const pend=L.filter(r=>!r.ja&&!r.feito&&!fora(r));
   const prontos=pend.filter(r=>r.escolha&&r.escolha!=='ignorar').length,semCat=pend.filter(r=>!r.escolha).length,ign=pend.filter(r=>r.escolha==='ignorar').length;
   const regrasLista=Object.entries(regras());
@@ -740,6 +746,8 @@ function importar(){
       <div class="card" style="--c:var(--muted)"><div class="lbl">🚫 Ignorados</div><div class="val">${ign}</div><div class="det">transferências, devoluções…</div></div>
       <div class="card" style="--c:var(--blue)"><div class="lbl">📌 Já no sistema</div><div class="val">${L.filter(r=>r.ja||r.feito).length}</div><div class="det">não serão lançados de novo</div></div>
     </div>
+    <div class="panel row" style="gap:10px"><b>Meu nome no banco:</b><input class="in" id="impNome" value="${esc(importacao.meuNome)}" placeholder="Ex.: seu nome completo" style="max-width:320px">
+      <span class="sub" style="margin:0">Pix enviado ou recebido com esse nome (transferência entre as suas contas) não é lançado · ${L.filter(r=>r.eu).length} encontrado(s)</span></div>
     <div class="panel row" style="gap:14px"><b>Lançar só o período:</b>
       <label class="row" style="gap:6px">de <input class="in" type="date" id="impDe" value="${importacao.desde}" style="width:auto"></label>
       <label class="row" style="gap:6px">até <input class="in" type="date" id="impAte" value="${importacao.ate}" style="width:auto"></label>
@@ -748,7 +756,7 @@ function importar(){
     <div class="panel scroll"><table><thead><tr><th>Data</th><th>Movimentação</th><th class="n">Valor</th><th>Lançar como</th></tr></thead><tbody>
     ${L.map((r,i)=>{if(importar.soFaltam&&(r.escolha||r.ja||r.feito||fora(r)))return '';
       const fim=r.ja||r.feito||fora(r);
-      return `<tr style="${fim?'opacity:.45':''}"><td>${fmtData(r.data)}</td><td>${esc(r.desc.replace(/^No estabelecimento /i,'')||r.tipo)}<div style="font-size:12px;color:var(--muted)">${esc(r.tipo)}${r.auto?' · <span class="pos">aprendido ✓</span>':''}${r.par?' · devolvido/estornado':''}</div></td>
+      return `<tr style="${fim?'opacity:.45':''}"><td>${fmtData(r.data)}</td><td>${esc(r.desc.replace(/^No estabelecimento /i,'')||r.tipo)}<div style="font-size:12px;color:var(--muted)">${esc(r.tipo)}${r.auto?' · <span class="pos">aprendido ✓</span>':''}${r.par?' · devolvido/estornado':''}${r.eu?' · <b>você mesmo</b> — entre suas contas':''}</div></td>
       <td class="n ${r.valor<0?'neg':'pos'}">${brl(r.valor)}</td>
       <td>${fim?`<span class="pill ${fora(r)&&!r.ja&&!r.feito?'pend':'ok'}">${r.ja?'já importado':r.feito?(r.escolha==='ignorar'?'ignorado':'lançado'):'fora do período — não será lançado'}</span>`:`<select class="in" data-imp="${i}" style="min-width:220px">${opcoesImport(r.escolha)}</select>`}</td></tr>`}).join('')}
     </tbody></table></div>`;
@@ -767,9 +775,10 @@ function importar(){
   app.querySelectorAll('[data-imp]').forEach(sel=>sel.onchange=()=>{
     const r=L[+sel.dataset.imp];r.escolha=sel.value;r.auto=false;
     // aplica a mesma escolha aos outros iguais deste extrato que ainda não têm categoria
-    L.forEach(x=>{if(x!==r&&x.chave===r.chave&&!x.ja&&!x.feito&&!x.par&&!fora(x)&&(!x.escolha||x.auto))x.escolha=r.escolha});
+    L.forEach(x=>{if(x!==r&&x.chave===r.chave&&!x.ja&&!x.feito&&!x.par&&!x.eu&&!fora(x)&&(!x.escolha||x.auto))x.escolha=r.escolha});
     importar();
   });
+  impNome.onchange=()=>{importacao.meuNome=impNome.value.trim();importar()};
   impDe.onchange=()=>{importacao.desde=impDe.value||'0000';importar()};
   impAte.onchange=()=>{importacao.ate=impAte.value||'9999';importar()};
   bSoFaltam.onclick=()=>{importar.soFaltam=!importar.soFaltam;importar()};
@@ -777,11 +786,12 @@ function importar(){
     let n=0,aprendeu=0;
     L.forEach(r=>{
       if(r.ja||r.feito||!r.escolha||fora(r))return;
-      if(!r.par&&regras()[r.chave]!==r.escolha){regras()[r.chave]=r.escolha;(db.config.regrasNome||(db.config.regrasNome={}))[r.chave]=(r.desc.replace(/^No estabelecimento /i,'')||r.tipo).slice(0,60);aprendeu++}
+      if(!r.par&&!r.eu&&regras()[r.chave]!==r.escolha){regras()[r.chave]=r.escolha;(db.config.regrasNome||(db.config.regrasNome={}))[r.chave]=(r.desc.replace(/^No estabelecimento /i,'')||r.tipo).slice(0,60);aprendeu++}
       r.feito=true;if(r.escolha==='ignorar')return;
       const [g,cat]=r.escolha.split('|');
       db.lancs.push({id:uid(),grupo:g,cat,desc:(r.desc.replace(/^No estabelecimento /i,'')||r.tipo),valor:Math.abs(r.valor),mes:r.data.slice(0,7),venc:r.data,pago:true,imp:r.id});n++;
     });
+    if(importacao.meuNome)db.config.meusNomes=[importacao.meuNome];
     save();toast(`${n} lançamento(s) criados · ${aprendeu} regra(s) aprendidas`);importar();
   };
 }
