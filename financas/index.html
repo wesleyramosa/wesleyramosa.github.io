@@ -540,7 +540,7 @@ function anual(){
   };
   app.innerHTML=`<h2>Visão anual ${ano}</h2><p class="sub">Mesmo formato da planilha: categorias × meses</p>
   ${tabela('🏢 Empresa (ME) — fontes de renda',[['entrada',1],['renda',-1,rendaDaEmpresa(),'🏠 Para a casa'],['contador',-1],['imposto',-1],['divida',-1,'Empresa'],
-    ['empresa',-1,[...new Set(catsDe('empresa').concat(db.lancs.filter(l=>l.grupo==='empresa').map(l=>l.cat)))].filter(empSemProlabore),'🏢 Outras saídas da empresa']],'Resultado final')}
+    ['empresa',-1,[...new Set(catsDe('empresa').concat(db.lancs.filter(l=>l.grupo==='empresa').map(l=>l.cat)))].filter(c=>c!=='Pró-labore'),'🏢 Outras saídas da empresa']],'Resultado final')}
   ${tabela('🏠 Casa',[['renda',1],['pessoal',-1],['divida',-1,'Casa']],'Resultado do mês')}`;
 }
 
