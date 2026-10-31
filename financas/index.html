@@ -685,6 +685,18 @@ function extrairInter(linhas){
   });
   return out;
 }
+// CSV do Inter: Data Lançamento;Histórico;Descrição;Valor;Saldo
+async function lerCsv(file){
+  const buf=await file.arrayBuffer();let txt=new TextDecoder('utf-8').decode(buf);
+  if(txt.includes('\uFFFD'))txt=new TextDecoder('windows-1252').decode(buf);
+  const ls=txt.split(/\r?\n/);const ini=ls.findIndex(l=>/^\s*data/i.test(l)&&l.includes(';'));if(ini<0)return [];
+  return ls.slice(ini+1).map(l=>l.split(';')).filter(c=>c.length>=4&&/^\d{2}\/\d{2}\/\d{4}$/.test(c[0].trim())).map(c=>{
+    const [d,m,a]=c[0].trim().split('/');let desc=c[2].trim();
+    // compra no cartão: nome do estabelecimento ocupa 22 letras, depois vem cidade e "Bra" (igual ao PDF)
+    if(/\sBra$/i.test(desc)&&desc.length>26)desc=desc.slice(0,22).trim();
+    return {data:`${a}-${m}-${d}`,tipo:c[1].trim(),desc,valor:parseFloat(c[3].trim().replace(/\./g,'').replace(',','.'))};
+  }).filter(t=>!isNaN(t.valor)).reverse();
+}
 function lerOfx(txt){
   return [...txt.matchAll(/<STMTTRN>([\s\S]*?)(?=<\/STMTTRN>|<STMTTRN>|<\/BANKTRANLIST>)/gi)].map(m=>{
     const g=k=>((m[1].match(new RegExp('<'+k+'>([^<\\r\\n]*)','i'))||[])[1]||'').trim();const d=g('DTPOSTED');
@@ -694,7 +706,7 @@ function lerOfx(txt){
 function prepararImportacao(txs,nome){
   const jaImportados=new Set(db.lancs.map(l=>l.imp).filter(Boolean)),cont={};
   const linhas=txs.map(t=>{
-    const base=`${t.data}|${t.valor}|${semAcento(t.tipo+t.desc).replace(/[^a-z0-9]/g,'')}`;cont[base]=(cont[base]||0)+1;
+    const base=`${t.data}|${t.valor}|${chaveDesc(t.tipo,t.desc)}`;cont[base]=(cont[base]||0)+1;
     const id=base+'#'+cont[base],chave=chaveDesc(t.tipo,t.desc),regra=regras()[chave]||'';
     return {...t,id,chave,escolha:regra,auto:!!regra,ja:jaImportados.has(id),feito:false,par:false};
   });
@@ -716,8 +728,8 @@ function importar(){
   const pend=L.filter(r=>!r.ja&&!r.feito);
   const prontos=pend.filter(r=>r.escolha&&r.escolha!=='ignorar').length,semCat=pend.filter(r=>!r.escolha).length,ign=pend.filter(r=>r.escolha==='ignorar').length;
   const regrasLista=Object.entries(regras());
-  let h=`<h2>📄 Importar extrato</h2><p class="sub">Envie o PDF do extrato do Inter (ou um arquivo OFX de qualquer banco). Na 1ª vez você escolhe a categoria de cada estabelecimento; nas próximas o app já preenche sozinho.</p>
-  <div class="panel row"><label class="btn" style="cursor:pointer">📎 Escolher extrato (PDF ou OFX)<input type="file" id="fExt" accept=".pdf,.ofx,application/pdf" hidden></label><span class="sub" style="margin:0" id="extMsg">${importacao?esc(importacao.nome)+` · ${L.length} movimentações`:''}</span></div>`;
+  let h=`<h2>📄 Importar extrato</h2><p class="sub">Envie o extrato do Inter em <b>PDF ou CSV</b>, do jeito que o banco gera (ou um arquivo OFX de qualquer banco). Na 1ª vez você escolhe a categoria de cada estabelecimento; nas próximas o app já preenche sozinho.</p>
+  <div class="panel row"><label class="btn" style="cursor:pointer">📎 Escolher extrato (PDF, CSV ou OFX)<input type="file" id="fExt" accept=".pdf,.ofx,.csv,application/pdf,text/csv" hidden></label><span class="sub" style="margin:0" id="extMsg">${importacao?esc(importacao.nome)+` · ${L.length} movimentações`:''}</span></div>`;
   if(importacao){
     h+=`<div class="cards">
       <div class="card" style="--c:var(--green)"><div class="lbl">✅ Prontos para lançar</div><div class="val">${prontos}</div><div class="det">com categoria escolhida ou aprendida</div></div>
@@ -739,10 +751,10 @@ function importar(){
   fExt.onchange=async()=>{
     const f=fExt.files[0];if(!f)return;extMsg.textContent='Lendo o extrato…';
     try{
-      const txs=/\.ofx$/i.test(f.name)?lerOfx(await f.text()):await lerPdf(f);
-      if(!txs.length){extMsg.textContent='Não encontrei movimentações nesse arquivo.';return}
+      const txs=/\.ofx$/i.test(f.name)?lerOfx(await f.text()):/\.csv$/i.test(f.name)?await lerCsv(f):await lerPdf(f);
+      if(!txs.length){extMsg.textContent='Não encontrei movimentações. Use o arquivo original baixado do app do Inter (PDF ou CSV), sem abrir e salvar de novo no Google Planilhas ou Excel.';return}
       prepararImportacao(txs,f.name);importar.soFaltam=false;importar();
-    }catch(e){extMsg.textContent='Não consegui ler esse arquivo.'}
+    }catch(e){extMsg.textContent='Não consegui ler esse arquivo. Use o PDF ou CSV original do Inter.'}
   };
   if(!importacao)return;
   app.querySelectorAll('[data-imp]').forEach(sel=>sel.onchange=()=>{
