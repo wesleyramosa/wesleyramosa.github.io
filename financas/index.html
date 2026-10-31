@@ -5,28 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Finanças ME + Casa</title>
-<meta name="theme-color" content="#0f3d2e">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="logo.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root{
-  --bg:#f4f6f5;--card:#fff;--ink:#16211c;--muted:#66736d;--line:#e2e7e4;
-  --brand:#0f3d2e;--brand2:#1d6b4f;
-  --green:#1a8f5a;--red:#c83a3a;--amber:#c98a12;--blue:#2c6bc9;--purple:#7b4fc4;
-  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.04);
+  --bg:#eceef0;--card:#fff;--ink:#1f2428;--muted:#6b737a;--line:#dde1e5;
+  --brand:#fff;--brand2:#454b50;
+  --green:#34a853;--red:#ea4335;--amber:#f2a900;--blue:#4285f4;--purple:#7b4fc4;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 14px rgba(0,0,0,.05);
+  color-scheme:light;
 }
-@media (prefers-color-scheme:dark){:root{
-  --bg:#0e1412;--card:#161f1b;--ink:#e6eeea;--muted:#93a29b;--line:#26332d;
-  --brand:#0b2a20;--brand2:#2b8a66;--shadow:none;
-}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{background:var(--brand);color:#fff;padding:14px 16px 0;position:sticky;top:0;z-index:5}
+header{background:var(--brand);color:var(--ink);border-bottom:1px solid var(--line);padding:14px 16px 0;position:sticky;top:0;z-index:5}
 .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:1200px;margin:0 auto}
-.top h1{font-size:18px;margin:0;flex:1;white-space:nowrap}
-.top select{background:#ffffff1a;color:#fff;border:1px solid #ffffff33;border-radius:8px;padding:6px 8px;font:inherit}
+.top h1{font-size:17px;margin:0;flex:1;white-space:nowrap;display:flex;align-items:center;gap:12px;color:var(--brand2)}
+.top h1 img{height:34px;width:auto}
+.top h1 span{padding-left:12px;border-left:1px solid var(--line);font-weight:600}
+.top select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit}
 .top select option{color:#000}
 nav{display:flex;gap:2px;overflow-x:auto;max-width:1200px;margin:10px auto 0;scrollbar-width:none}
-nav a{color:#ffffffb3;text-decoration:none;padding:9px 12px;border-radius:8px 8px 0 0;white-space:nowrap;font-size:14px}
+nav a{color:var(--muted);text-decoration:none;padding:9px 12px;border-radius:8px 8px 0 0;white-space:nowrap;font-size:14px}
 nav a.on{background:var(--bg);color:var(--ink);font-weight:600}
 main{max-width:1200px;margin:0 auto;padding:18px 16px 60px}
 h2{font-size:20px;margin:0 0 4px}
@@ -84,7 +84,7 @@ label.f{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
 <body>
 <header>
   <div class="top">
-    <h1>💼 Finanças ME + Casa</h1>
+    <h1><img src="logo.png" alt="W2A"><span>Finanças ME + Casa</span></h1>
     <select id="selAno" aria-label="Ano"></select>
     <select id="selMes" aria-label="Mês"></select>
   </div>
