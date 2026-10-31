@@ -363,8 +363,11 @@ function form(g,l,pre){
         db.lancs.push({...base,id:uid(),mes:mm,venc,pago:i?false:base.pago});
         if(g==='empresa'&&base.cat==='Pró-labore'&&fd.get('espelho'))db.lancs.push({grupo:'renda',cat:'Salário',desc:'Pró-labore',valor,mes:mm,venc:'',pago:i?false:base.pago,id:uid()});
       });
-      toast(meses.length>1?`${meses.length} lançamentos criados`:'Lançamento salvo');
+      const nm=mm=>MESES[+mm.slice(5)-1]+'/'+mm.slice(0,4);
+      toast(meses.length>1?`${meses.length} lançamentos criados (${nm(meses[0])} a ${nm(meses.at(-1))})`:`Lançamento salvo em ${nm(base.mes)}`);
     }else{Object.assign(l,base);toast('Alterações salvas')}
+    // se foi lançado em outro mês, abre esse mês para o lançamento aparecer na tela
+    if(!doPeriodo(base)){ano=+base.mes.slice(0,4);mes=+base.mes.slice(5);localStorage.setItem(KEY+':ano',ano);localStorage.setItem(KEY+':mes',mes);montarTopo()}
     save();render();
   };
   dlg.showModal();
