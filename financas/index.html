@@ -563,14 +563,6 @@ function cardsSaldoRenda(tot,pago){
     <div class="card" style="--c:var(--amber)"><div class="lbl">A receber</div><div class="val">${brl(tot-pago)}</div></div>
   </div>`;
 }
-function abertosAnteriores(g){
-  const ls=db.lancs.filter(l=>l.grupo===g&&!l.pago&&l.mes<inicioDoPeriodo()).sort((a,b)=>a.mes.localeCompare(b.mes));
-  if(!ls.length)return '';
-  return `<div class="panel scroll"><h3>⏳ Em aberto de meses anteriores — ${brl(soma(ls))}</h3><table><tbody>
-  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td class="n">${brl(+l.valor)}</td>
-    <td><span class="pill late">Em aberto</span></td><td class="n"><button class="btn sm" data-abater-lanc="${l.id}">Abater</button> <button class="icon" data-pay="${l.id}" title="Marcar como pago">✅</button><button class="icon" data-ed="${l.id}" title="Editar">✏️</button></td></tr>`).join('')}
-  </tbody></table></div>`;
-}
 function cardsSaldoCasa(tot,pago){
   const r=resumo(doPeriodo),ant=saldoTrazido(inicioDoPeriodo()),saldo=ant+r.resCasa;
   return `<div class="cards c5">
@@ -601,7 +593,6 @@ function lista(g,tipo){
   ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':GRUPOS_ABERTO.includes(g)&&!l.pago&&l.mes<mesAtual()?'Virou dívida':STATUS_TXT[status(l)]}</button></td><td class="n">${GRUPOS_ABERTO.includes(g)&&!l.pago?`<button class="btn sm" data-abater-lanc="${l.id}">Abater</button> `:''}<button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
   </tbody></table>`:'<div class="empty">Nenhum lançamento neste período.</div>'}</div>
   ${g==='entrada'?painelClientes():''}
-  ${GRUPOS_ABERTO.includes(g)?abertosAnteriores(g):''}
   ${g==='divida'?avisoSemDivida(tipo)+cardsDividas(tipo)+(tipo==='empresa'?painelVirouDivida():'')+painelDividas(tipo):''}`;
 }
 
