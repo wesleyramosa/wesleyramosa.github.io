@@ -387,15 +387,19 @@ function painelCasa(){
   app.innerHTML=h;
   graficoAno('casa');
 }
+const GRUPOS_ABERTO=['imposto','contador'];
+const emAberto=(ate)=>db.lancs.filter(l=>GRUPOS_ABERTO.includes(l.grupo)&&!l.pago&&l.mes<=ate);
 function cardTipoDiv(tipo){
   const ini=inicioDoPeriodo(),fim=fimDoPeriodo();
   const ds=dividas().filter(d=>tipoDiv(d)===tipo&&d.inicio<=fim);
-  const antes=ds.reduce((s,d)=>s+saldoAntes(d,ini),0),noPer=ds.reduce((s,d)=>s+abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),0),depois=antes-noPer;
+  // na empresa, impostos e contador não pagos até o fim do período também são dívida
+  const abertos=tipo==='empresa'?soma(emAberto(fim)):0;
+  const antes=ds.reduce((s,d)=>s+saldoAntes(d,ini),0)+abertos,noPer=ds.reduce((s,d)=>s+abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),0),depois=antes-noPer;
   const total=ds.reduce((s,d)=>s+d.valor,0),pct=total?Math.min(100,(total-depois)/total*100):0;
   const prox=mes&&mes<12?`${MESES[mes]}/${ano}`:`Jan/${ano+1}`;
   return `<a class="card" href="#${tipo==='casa'?'dividacasa':'divida'}" style="--c:var(--red)"><div class="lbl">💳 Dívidas da ${tipo}</div>
-    <div class="val ${antes?'neg':''}">${brl(antes)}</div><div class="det">${ds.length?`${ds.length} dívida(s) · início ${mes?`de ${MESES[mes-1]}`:'do ano'}`:'Nenhuma dívida'}</div>
-    ${ds.length?`<div class="bar"><i style="width:${pct}%"></i></div><div class="det">${noPer?`Abatido <b class="pos">${brl(noPer)}</b> · `:''}${prox} começa com <b>${brl(depois)}</b></div>`:''}</a>`;
+    <div class="val ${antes?'neg':''}">${brl(antes)}</div><div class="det">${ds.length?`${ds.length} dívida(s)`:''}${ds.length&&abertos?' + ':''}${abertos?`${brl(abertos)} de impostos/contador em aberto`:''}${!ds.length&&!abertos?'Nenhuma dívida':''}</div>
+    ${ds.length||abertos?`<div class="bar"><i style="width:${pct}%"></i></div><div class="det">${noPer?`Abatido <b class="pos">${brl(noPer)}</b> · `:''}${prox} começa com <b>${brl(depois)}</b></div>`:''}</a>`;
 }
 function cardsDividas(filtro){
   const ds=dividas().filter(d=>!filtro||tipoDiv(d)===filtro).filter(d=>d.inicio<=fimDoPeriodo());
@@ -509,6 +513,14 @@ function graficoAno(a){
 }
 
 // ---------- listas ----------
+function abertosAnteriores(g){
+  const ls=db.lancs.filter(l=>l.grupo===g&&!l.pago&&l.mes<inicioDoPeriodo()).sort((a,b)=>a.mes.localeCompare(b.mes));
+  if(!ls.length)return '';
+  return `<div class="panel scroll"><h3>⏳ Em aberto de meses anteriores — ${brl(soma(ls))}</h3><table><tbody>
+  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td class="n">${brl(+l.valor)}</td>
+    <td><span class="pill late">Em aberto</span></td><td class="n"><button class="btn sm" data-abater-lanc="${l.id}">Abater</button> <button class="icon" data-pay="${l.id}" title="Marcar como pago">✅</button><button class="icon" data-ed="${l.id}" title="Editar">✏️</button></td></tr>`).join('')}
+  </tbody></table></div>`;
+}
 function cardsSaldoCasa(tot,pago){
   const r=resumo(doPeriodo);
   return `<div class="cards c5">
@@ -529,13 +541,15 @@ function lista(g,tipo){
   <div class="cards" ${g==='pessoal'?'hidden':''}>
     <div class="card" style="--c:${G.cor}"><div class="lbl">Total no período</div><div class="val">${brl(tot)}</div><div class="det">${ls.length} lançamento(s)</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">${isRec?'Recebido':'Pago'}</div><div class="val pos">${brl(pago)}</div></div>
-    <div class="card" style="--c:var(--amber)"><div class="lbl">${isRec?'A receber':'A pagar'}</div><div class="val">${brl(tot-pago)}</div></div>
+    <div class="card" style="--c:var(--amber)"><div class="lbl">${isRec?'A receber':'A pagar'}</div><div class="val">${brl(tot-pago)}</div>${GRUPOS_ABERTO.includes(g)?'<div class="det">deste período</div>':''}</div>
+    ${GRUPOS_ABERTO.includes(g)?`<div class="card" style="--c:var(--red)"><div class="lbl">💳 Em aberto (acumulado)</div><div class="val neg">${brl(soma(emAberto(fimDoPeriodo()).filter(l=>l.grupo===g)))}</div><div class="det">fica como dívida até você pagar ou abater</div></div>`:''}
   </div>
   ${g==='pessoal'?painelCategorias('pessoal'):''}
   <div class="panel scroll" ${g==='pessoal'?'hidden':''}>${ls.length?`<table><thead><tr><th>Mês</th><th>Categoria</th><th>Descrição</th><th>Vencimento</th><th class="n">Valor</th><th>Status</th><th></th></tr></thead><tbody>
-  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':STATUS_TXT[status(l)]}</button></td><td class="n"><button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
+  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':STATUS_TXT[status(l)]}</button></td><td class="n">${GRUPOS_ABERTO.includes(g)&&!l.pago?`<button class="btn sm" data-abater-lanc="${l.id}">Abater</button> `:''}<button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
   </tbody></table>`:'<div class="empty">Nenhum lançamento neste período.</div>'}</div>
   ${g==='entrada'?painelClientes():''}
+  ${GRUPOS_ABERTO.includes(g)?abertosAnteriores(g):''}
   ${g==='divida'?avisoSemDivida(tipo)+cardsDividas(tipo)+painelDividas(tipo):''}`;
 }
 
@@ -890,6 +904,14 @@ app.addEventListener('change',e=>{
 });
 app.addEventListener('click',e=>{
   const ac=e.target.closest('[data-abrir-cat]');if(ac){const k=ac.dataset.abrirCat;catsAbertas.has(k)?catsAbertas.delete(k):catsAbertas.add(k);render();return}
+  const ab=e.target.closest('[data-abater-lanc]');
+  if(ab){const l=db.lancs.find(x=>x.id===ab.dataset.abaterLanc);if(!l)return;
+    const v=parseValor(prompt(`Quanto você pagou de "${l.desc||l.cat}"? (em aberto: ${brl(+l.valor)})`,String(l.valor).replace('.',','))||'');
+    if(isNaN(v)||v<=0)return;
+    const hj=hoje.toISOString().slice(0,10);
+    if(v>=+l.valor-0.005){l.pago=true;l.pagoEm=hj;toast('Pago por completo')}
+    else{l.valor=Math.round((+l.valor-v)*100)/100;db.lancs.push({...l,id:uid(),valor:v,pago:true,pagoEm:hj,desc:(l.desc?l.desc+' — ':'')+'abatimento'});toast(`Abatido ${brl(v)} · em aberto ${brl(l.valor)}`)}
+    save();render();return}
   const cm=e.target.closest('[data-copiar-metas]');
   if(cm){const [g,mm]=cm.dataset.copiarMetas.split('|');const por={};db.lancs.filter(l=>l.grupo===g&&l.mes===mm).forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
     if(!Object.keys(por).length){toast('Não há gastos nesse mês para copiar');return}
