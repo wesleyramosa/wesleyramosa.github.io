@@ -356,7 +356,7 @@ function painel(){
   graficoAno('empresa');
 }
 function painelCasa(){
-  const r=resumo(doPeriodo),per=nomePer();
+  const r=resumo(doPeriodo),per=nomePer(),antCasa=saldoTrazido(inicioDoPeriodo());
   const pend=pendentes(ehDaCasa);
   const teto=(metaTotalMes('pessoal')||db.config.metaPessoal||0)*(mes?1:12),pctTeto=teto?Math.min(100,r.pes/teto*100):0;
   const por={};de('pessoal').forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
@@ -369,7 +369,7 @@ function painelCasa(){
     ${card('renda',r.ren,`${brl(r.rep)} vem da empresa`)}
     ${card('pessoal',r.pes,`${pctTxt(r.pes,r.ren)} da renda · ${pendTxt('pessoal')}`)}
     ${cardTipoDiv('casa')}
-    <div class="card" style="--c:var(--brand2)"><div class="lbl">💰 Saldo da casa</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Renda − despesas${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></div>
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">💰 Saldo da casa</div><div class="val ${antCasa+r.resCasa<0?'neg':'pos'}">${brl(antCasa+r.resCasa)}</div><div class="det">${antCasa?`Saldo de ${nomeAnterior()} ${brl(antCasa)} + `:''}Renda − despesas${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">🧱 Teto de despesas</div><div class="val">${teto?pctTeto.toFixed(0)+'%':'—'}</div><div class="bar"><i style="width:${pctTeto}%;background:${pctTeto>=100?'var(--red)':pctTeto>=85?'var(--amber)':'var(--green)'}"></i></div><div class="det">${teto?`${brl(r.pes)} de ${brl(teto)}${metaTotalMes('pessoal')?' (soma das metas)':''}`:'Defina as metas em Despesas'}</div></div>
   </div>
   <div class="cards c5">
@@ -513,6 +513,33 @@ function graficoAno(a){
 }
 
 // ---------- listas ----------
+// saldo que a casa traz para o início de um mês: soma os resultados dos meses anteriores.
+// config.saldoInicial[mes] é um valor digitado à mão e recomeça a conta a partir dele.
+const ehCasa=l=>l.grupo==='renda'||l.grupo==='pessoal'||(l.grupo==='divida'&&tipoLanc(l)==='casa');
+const mesSeguinte=mm=>{const [a,m]=mm.split('-').map(Number);return m===12?mk(a+1,1):mk(a,m+1)};
+function saldoTrazido(mm){
+  const man=db.config.saldoInicial||{};
+  if(man[mm]!=null)return man[mm];
+  const meses=db.lancs.filter(ehCasa).map(l=>l.mes).concat(Object.keys(man)).sort();
+  if(!meses.length||meses[0]>=mm)return 0;
+  let v=0;
+  for(let c=meses[0];c<mm;c=mesSeguinte(c)){
+    if(man[c]!=null)v=man[c];
+    v+=resumo(l=>l.mes===c).resCasa;
+  }
+  return Math.round(v*100)/100;
+}
+const nomeAnterior=()=>{if(!mes)return String(ano-1);return MESES_L[mes===1?11:mes-2]};
+function cardsSaldoRenda(tot,pago){
+  const mm=inicioDoPeriodo(),ant=saldoTrazido(mm),manual=(db.config.saldoInicial||{})[mm]!=null;
+  return `<div class="cards c5">
+    <div class="card" style="--c:var(--purple)"><div class="lbl">⬅️ Saldo de ${nomeAnterior()}</div><div class="val ${ant<0?'neg':'pos'}">${brl(ant)}</div><div class="det">${manual?'Valor digitado':'Calculado'} · <button class="icon" style="padding:0" data-saldo-ini="${mm}" title="Ajustar o valor">✏️ ajustar</button></div></div>
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">🏠 Renda do período</div><div class="val">${brl(tot)}</div></div>
+    <div class="card" style="--c:var(--green)"><div class="lbl">💰 Total disponível</div><div class="val ${ant+tot<0?'neg':'pos'}">${brl(ant+tot)}</div><div class="det">Saldo anterior + renda</div></div>
+    <div class="card" style="--c:var(--green)"><div class="lbl">Recebido</div><div class="val">${brl(pago)}</div></div>
+    <div class="card" style="--c:var(--amber)"><div class="lbl">A receber</div><div class="val">${brl(tot-pago)}</div></div>
+  </div>`;
+}
 function abertosAnteriores(g){
   const ls=db.lancs.filter(l=>l.grupo===g&&!l.pago&&l.mes<inicioDoPeriodo()).sort((a,b)=>a.mes.localeCompare(b.mes));
   if(!ls.length)return '';
@@ -522,11 +549,11 @@ function abertosAnteriores(g){
   </tbody></table></div>`;
 }
 function cardsSaldoCasa(tot,pago){
-  const r=resumo(doPeriodo);
+  const r=resumo(doPeriodo),ant=saldoTrazido(inicioDoPeriodo()),saldo=ant+r.resCasa;
   return `<div class="cards c5">
-    <a class="card" href="#renda" style="--c:var(--green)"><div class="lbl">💰 Entrada total</div><div class="val pos">${brl(r.ren)}</div><div class="det">Renda da casa no período</div></a>
+    <a class="card" href="#renda" style="--c:var(--green)"><div class="lbl">💰 Entrada total</div><div class="val pos">${brl(r.ren+ant)}</div><div class="det">Renda ${brl(r.ren)}${ant?` + saldo de ${nomeAnterior()} ${brl(ant)}`:''}</div></a>
     <div class="card" style="--c:var(--red)"><div class="lbl">🛒 Despesa total</div><div class="val neg">${brl(tot)}</div><div class="det">${pctTxt(tot,r.ren)} da renda${metaTotalMes('pessoal')?` · meta ${brl(metaTotalMes('pessoal')*(mes?1:12))}`:''}</div></div>
-    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">${brl(r.ren)} − ${brl(r.pes)} despesas${r.divC?` − ${brl(r.divC)} pagos em dívidas`:''}${r.divCPend?`<br>Dívida a pagar ${brl(r.divCPend)} · só sai do saldo quando você marcar como paga`:''}</div></div>
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${saldo<0?'neg':'pos'}">${brl(saldo)}</div><div class="det">${brl(r.ren+ant)} − ${brl(r.pes)} despesas${r.divC?` − ${brl(r.divC)} pagos em dívidas`:''}${r.divCPend?`<br>Dívida a pagar ${brl(r.divCPend)} · só sai do saldo quando você marcar como paga`:''}</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">✅ Pago</div><div class="val">${brl(pago)}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">⏳ A pagar</div><div class="val">${brl(tot-pago)}</div></div>
   </div>`;
@@ -538,7 +565,8 @@ function lista(g,tipo){
   const isRec=g==='entrada'||g==='renda';
   app.innerHTML=`<div class="row"><div><h2>${G.icone} ${tipo?`Dívidas da ${tipo}`:G.nome}</h2><p class="sub">${tipo?(tipo==='casa'?'Dívidas da casa — o que você paga sai do saldo da casa':'Dívidas da empresa — separadas das contas mensais'):G.desc} · ${per}</p></div><span class="spacer"></span><button class="btn" data-novo="${g}" data-tipo="${tipo||''}">+ Novo lançamento</button></div>
   ${g==='pessoal'?cardsSaldoCasa(tot,pago):''}
-  <div class="cards" ${g==='pessoal'?'hidden':''}>
+  ${g==='renda'?cardsSaldoRenda(tot,pago):''}
+  <div class="cards" ${g==='pessoal'||g==='renda'?'hidden':''}>
     <div class="card" style="--c:${G.cor}"><div class="lbl">Total no período</div><div class="val">${brl(tot)}</div><div class="det">${ls.length} lançamento(s)</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">${isRec?'Recebido':'Pago'}</div><div class="val pos">${brl(pago)}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">${isRec?'A receber':'A pagar'}</div><div class="val">${brl(tot-pago)}</div>${GRUPOS_ABERTO.includes(g)?'<div class="det">deste período</div>':''}</div>
@@ -912,6 +940,12 @@ app.addEventListener('click',e=>{
     if(v>=+l.valor-0.005){l.pago=true;l.pagoEm=hj;toast('Pago por completo')}
     else{l.valor=Math.round((+l.valor-v)*100)/100;db.lancs.push({...l,id:uid(),valor:v,pago:true,pagoEm:hj,desc:(l.desc?l.desc+' — ':'')+'abatimento'});toast(`Abatido ${brl(v)} · em aberto ${brl(l.valor)}`)}
     save();render();return}
+  const si=e.target.closest('[data-saldo-ini]');
+  if(si){const mm=si.dataset.saldoIni,atual=saldoTrazido(mm);
+    const r=prompt('Saldo que veio do mês anterior (R$). Deixe em branco para o app calcular sozinho.',String(atual).replace('.',','));
+    if(r===null)return;const m=db.config.saldoInicial||(db.config.saldoInicial={});
+    if(!r.trim())delete m[mm];else{const v=parseValor(r);if(isNaN(v)){toast('Valor inválido');return}m[mm]=v}
+    save();render();toast('Saldo atualizado');return}
   const cm=e.target.closest('[data-copiar-metas]');
   if(cm){const [g,mm]=cm.dataset.copiarMetas.split('|');const por={};db.lancs.filter(l=>l.grupo===g&&l.mes===mm).forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
     if(!Object.keys(por).length){toast('Não há gastos nesse mês para copiar');return}
