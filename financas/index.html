@@ -312,9 +312,9 @@ const ehRepasse=l=>l.grupo==='renda'&&rendaDaEmpresa().includes(l.cat);
 // pró-labore em "Saídas da empresa" já aparece como Salário na casa; não conta duas vezes
 const empSemProlabore=l=>l.cat!=='Pró-labore';
 function resumo(f){
-  const ent=soma(de('entrada',f)),cont=soma(de('contador',f)),imp=soma(de('imposto',f)),emp=soma(de('empresa',f)),divE=soma(de('divida',f).filter(l=>tipoLanc(l)==='empresa')),divC=soma(de('divida',f).filter(l=>tipoLanc(l)==='casa'));
+  const ent=soma(de('entrada',f)),cont=soma(de('contador',f)),imp=soma(de('imposto',f)),emp=soma(de('empresa',f)),divE=soma(de('divida',f).filter(l=>l.pago&&tipoLanc(l)==='empresa')),divC=soma(de('divida',f).filter(l=>l.pago&&tipoLanc(l)==='casa')),divCPend=soma(de('divida',f).filter(l=>!l.pago&&tipoLanc(l)==='casa'));
   const ren=soma(de('renda',f)),pes=soma(de('pessoal',f)),rep=soma(de('renda',f).filter(ehRepasse)),empOutras=soma(de('empresa',f).filter(empSemProlabore));
-  return {ent,cont,imp,emp,empOutras,divE,divC,ren,rep,pes,resEmp:ent-rep-cont-imp-empOutras-divE,resCasa:ren-pes-divC};
+  return {ent,cont,imp,emp,empOutras,divE,divC,divCPend,ren,rep,pes,resEmp:ent-rep-cont-imp-empOutras-divE,resCasa:ren-pes-divC};
 }
 const GRUPOS_EMPRESA=['contador','imposto','empresa'];
 const ehDaEmpresa=l=>GRUPOS_EMPRESA.includes(l.grupo)||(l.grupo==='divida'&&tipoLanc(l)==='empresa');
@@ -526,7 +526,7 @@ function cardsSaldoCasa(tot,pago){
   return `<div class="cards c5">
     <a class="card" href="#renda" style="--c:var(--green)"><div class="lbl">💰 Entrada total</div><div class="val pos">${brl(r.ren)}</div><div class="det">Renda da casa no período</div></a>
     <div class="card" style="--c:var(--red)"><div class="lbl">🛒 Despesa total</div><div class="val neg">${brl(tot)}</div><div class="det">${pctTxt(tot,r.ren)} da renda${metaTotalMes('pessoal')?` · meta ${brl(metaTotalMes('pessoal')*(mes?1:12))}`:''}</div></div>
-    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">${brl(r.ren)} − ${brl(r.pes)} despesas${r.divC?` − ${brl(r.divC)} pagos em dívidas`:''}</div></div>
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">${brl(r.ren)} − ${brl(r.pes)} despesas${r.divC?` − ${brl(r.divC)} pagos em dívidas`:''}${r.divCPend?`<br>Dívida a pagar ${brl(r.divCPend)} · só sai do saldo quando você marcar como paga`:''}</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">✅ Pago</div><div class="val">${brl(pago)}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">⏳ A pagar</div><div class="val">${brl(tot-pago)}</div></div>
   </div>`;
