@@ -338,7 +338,7 @@ function painel(){
 function painelCasa(){
   const r=resumo(doPeriodo),per=nomePer();
   const pend=pendentes(ehDaCasa);
-  const teto=(db.config.metaPessoal||0)*(mes?1:12),pctTeto=teto?Math.min(100,r.pes/teto*100):0;
+  const teto=(metaTotalMes('pessoal')||db.config.metaPessoal||0)*(mes?1:12),pctTeto=teto?Math.min(100,r.pes/teto*100):0;
   const por={};de('pessoal').forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
   const maior=Object.entries(por).sort((a,b)=>b[1]-a[1])[0];
   const mesesComGasto=new Set(db.lancs.filter(l=>l.grupo==='pessoal'&&l.mes.startsWith(ano+'-')).map(l=>l.mes)).size;
@@ -350,7 +350,7 @@ function painelCasa(){
     ${card('pessoal',r.pes,`${pctTxt(r.pes,r.ren)} da renda · ${pendTxt('pessoal')}`)}
     ${cardTipoDiv('casa')}
     <div class="card" style="--c:var(--brand2)"><div class="lbl">💰 Saldo da casa</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Renda − despesas${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></div>
-    <div class="card" style="--c:var(--amber)"><div class="lbl">🧱 Teto de despesas</div><div class="val">${teto?pctTeto.toFixed(0)+'%':'—'}</div><div class="bar"><i style="width:${pctTeto}%;background:${pctTeto>=100?'var(--red)':pctTeto>=85?'var(--amber)':'var(--green)'}"></i></div><div class="det">${teto?`${brl(r.pes)} de ${brl(teto)}`:'Defina o teto em Backup'}</div></div>
+    <div class="card" style="--c:var(--amber)"><div class="lbl">🧱 Teto de despesas</div><div class="val">${teto?pctTeto.toFixed(0)+'%':'—'}</div><div class="bar"><i style="width:${pctTeto}%;background:${pctTeto>=100?'var(--red)':pctTeto>=85?'var(--amber)':'var(--green)'}"></i></div><div class="det">${teto?`${brl(r.pes)} de ${brl(teto)}${metaTotalMes('pessoal')?' (soma das metas)':''}`:'Defina as metas em Despesas'}</div></div>
   </div>
   <div class="cards c5">
     <a class="card" href="#renda" style="--c:var(--brand2)"><div class="lbl">🏢 Vem da empresa</div><div class="val">${brl(r.rep)}</div><div class="det">Salário / pró-labore</div></a>
@@ -424,14 +424,35 @@ function formDivida(tipo,d){
 function card(g,v,det){const G=GRUPOS[g];return `<a class="card" href="#${g}" style="--c:${G.cor}"><div class="lbl">${G.icone} ${G.nome}</div><div class="val">${brl(v)}</div><div class="det">${det}</div></a>`}
 const pctTxt=(a,b)=>b?(a/b*100).toFixed(0)+'%':'—';
 function pendTxt(g){const p=de(g).filter(l=>!l.pago);return p.length?`${p.length} pendente(s)`:'tudo pago'}
+// metas mensais por categoria (config.metas[grupo][categoria]); no "ano todo" vale meta × 12
+const metasDe=g=>{const m=db.config.metas||(db.config.metas={});return m[g]||(m[g]={})};
+const metaTotalMes=g=>Object.values(metasDe(g)).reduce((s,v)=>s+(+v||0),0);
 function painelCategorias(g){
   const ls=de(g),tot=soma(ls),por={};ls.forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
-  const max=Math.max(1,...Object.values(por));
-  return `<div class="panel scroll"><h3>Categorias — ${nomePer()}</h3><table><tbody>
-  ${catsDe(g).map(c=>{const v=por[c]||0;return `<tr><td style="width:180px">${esc(c)}</td><td><div class="bar" style="margin:0"><i style="width:${v/max*100}%;background:var(--red)"></i></div></td>
-    <td class="n" style="width:150px">${v?brl(v):'<span style="color:var(--muted)">—</span>'} ${v&&tot?`<small style="color:var(--muted)">${(v/tot*100).toFixed(0)}%</small>`:''}</td>
-    <td class="n" style="width:90px"><button class="btn sec sm" data-novo="${g}" data-cat="${esc(c)}">+ Lançar</button></td></tr>`}).join('')}
-  <tr class="tot"><td><b>Total</b></td><td></td><td class="n"><b>${brl(tot)}</b></td><td class="n"><button class="btn sec sm" data-novo="${g}" data-cat="__nova">+ Categoria</button></td></tr>
+  const mult=mes?1:12,metas=metasDe(g),renda=soma(de('renda'));
+  const pctRenda=v=>renda&&v?`<small style="color:var(--muted)">${(v/renda*100).toFixed(1).replace('.',',')}%</small>`:'';
+  const linha=c=>{
+    const v=por[c]||0,m=(+metas[c]||0)*mult,dif=m-v,pct=m?v/m*100:(v?100:0);
+    const cor=!m?'var(--muted)':pct>100?'var(--red)':pct>=85?'var(--amber)':'var(--green)';
+    return `<tr><td>${esc(c)}</td>
+    <td class="n"><input class="in" data-meta="${g}|${esc(c)}" value="${metas[c]?String(metas[c]).replace('.',','):''}" placeholder="—" inputmode="decimal" style="width:100px;text-align:right;padding:5px 8px"></td>
+    <td class="n">${v?brl(v):'<span style="color:var(--muted)">—</span>'}</td>
+    <td style="min-width:110px"><div class="bar" style="margin:0"><i style="width:${Math.min(100,pct)}%;background:${cor}"></i></div></td>
+    <td class="n" style="color:${m?(dif<0?'var(--red)':'var(--green)'):'var(--muted)'}">${m?(dif<0?'estourou '+brl(-dif):'sobra '+brl(dif)):'—'}</td>
+    <td class="n">${pctRenda(v)}</td>
+    <td class="n"><button class="btn sec sm" data-novo="${g}" data-cat="${esc(c)}">+ Lançar</button></td></tr>`;
+  };
+  const metaTot=metaTotalMes(g)*mult,difTot=metaTot-tot;
+  const ant=mes?(mes===1?mk(ano-1,12):mk(ano,mes-1)):null;
+  return `<div class="panel scroll"><div class="row"><h3 style="margin:0">Metas × gasto real — ${nomePer()}</h3><span class="spacer"></span>
+    ${ant?`<button class="btn sec sm" data-copiar-metas="${g}|${ant}">Usar o gasto de ${MESES[+ant.slice(5)-1]}/${ant.slice(0,4)} como meta</button>`:''}</div>
+  <p class="sub" style="margin:6px 0 10px">Meta mensal de cada categoria (digite e saia do campo para salvar)${mes?'':' · no ano todo a meta é × 12'}. A % é sobre a renda da casa no período (${brl(renda)}).</p>
+  <table><thead><tr><th>Categoria</th><th class="n">Meta/mês</th><th class="n">Real</th><th></th><th class="n">Diferença</th><th class="n">% da renda</th><th></th></tr></thead><tbody>
+  ${catsDe(g).map(linha).join('')}
+  <tr class="tot"><td><b>Total</b></td><td class="n"><b>${metaTot?brl(metaTot):'—'}</b></td><td class="n"><b>${brl(tot)}</b></td>
+    <td><div class="bar" style="margin:0"><i style="width:${metaTot?Math.min(100,tot/metaTot*100):0}%;background:${metaTot&&tot>metaTot?'var(--red)':'var(--green)'}"></i></div></td>
+    <td class="n" style="color:${difTot<0?'var(--red)':'var(--green)'}"><b>${metaTot?(difTot<0?'estourou '+brl(-difTot):'sobra '+brl(difTot)):'—'}</b></td>
+    <td class="n">${pctRenda(tot)}</td><td class="n"><button class="btn sec sm" data-novo="${g}" data-cat="__nova">+ Categoria</button></td></tr>
   </tbody></table></div>`;
 }
 function catBars(g){
@@ -798,7 +819,18 @@ function importar(){
 }
 
 // ---------- ações ----------
+app.addEventListener('change',e=>{
+  const t=e.target.closest('[data-meta]');if(!t)return;
+  const [g,c]=t.dataset.meta.split(/\|(.*)/s);const v=parseValor(t.value);
+  if(isNaN(v)||v<=0)delete metasDe(g)[c];else metasDe(g)[c]=v;
+  save();render();toast('Meta salva');
+});
 app.addEventListener('click',e=>{
+  const cm=e.target.closest('[data-copiar-metas]');
+  if(cm){const [g,mm]=cm.dataset.copiarMetas.split('|');const por={};db.lancs.filter(l=>l.grupo===g&&l.mes===mm).forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
+    if(!Object.keys(por).length){toast('Não há gastos nesse mês para copiar');return}
+    if(!confirm(`Usar o gasto real de ${MESES[+mm.slice(5)-1]}/${mm.slice(0,4)} como meta mensal de cada categoria? As metas atuais serão trocadas.`))return;
+    metasDe(g);db.config.metas[g]=Object.fromEntries(Object.entries(por).map(([c,v])=>[c,Math.round(v*100)/100]));save();render();toast('Metas atualizadas');return}
   const rd=e.target.closest('[data-regra-del]');if(rd){delete regras()[rd.dataset.regraDel];if(db.config.regrasNome)delete db.config.regrasNome[rd.dataset.regraDel];save();render();return}
   const t=e.target.closest('[data-novo],[data-ed],[data-del],[data-pay],[data-dup],[data-cli-novo],[data-cat-del],[data-cli-ed],[data-cli-del],[data-lancar],[data-div-novo],[data-div-ed],[data-div-del],[data-abater]');if(!t)return;
   const div=id=>dividas().find(d=>d.id===id);
