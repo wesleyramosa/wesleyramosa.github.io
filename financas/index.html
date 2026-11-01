@@ -17,6 +17,7 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 header{background:var(--brand);color:var(--ink);border-bottom:1px solid var(--line);padding:14px 16px 0;position:sticky;top:0;z-index:5}
 .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;max-width:1200px;margin:0 auto}
@@ -413,6 +414,10 @@ function cardsDividas(filtro){
   return `<div class="cards">${linhas.map(x=>x.html).join('')}
     ${linhas.length>1?`<div class="card" style="--c:var(--red)"><div class="lbl">💳 Total de dívidas</div><div class="val neg">${brl(totA)}</div><div class="det">Início ${mes?`de ${MESES[mes-1]}`:'do ano'} → fim: <b>${brl(totD)}</b></div></div>`:''}</div>`;
 }
+function avisoSemDivida(tipo){
+  const sem=db.lancs.filter(l=>l.grupo==='divida'&&!l.div&&tipoLanc(l)===tipo);
+  return sem.length?`<div class="alert">⚠️ ${sem.length} pagamento(s) sem dívida ligada (${sem.map(l=>MESES[+l.mes.slice(5)-1]+'/'+l.mes.slice(2,4)+' '+brl(+l.valor)).join(', ')}). Eles saem do saldo, mas <b>não abatem</b> nenhuma dívida. Clique no ✏️ do pagamento e escolha qual dívida ele abate.</div>`:'';
+}
 function painelDividas(tipo){
   const ds=dividas().filter(d=>!tipo||tipoDiv(d)===tipo);
   return `<div class="panel scroll"><div class="row"><h3 style="margin:0">💳 Dívidas da ${tipo||'empresa e da casa'}</h3><span class="spacer"></span><button class="btn sec sm" data-div-novo="${tipo||'empresa'}">+ Dívida</button></div>
@@ -509,7 +514,7 @@ function cardsSaldoCasa(tot,pago){
   return `<div class="cards c5">
     <a class="card" href="#renda" style="--c:var(--green)"><div class="lbl">💰 Entrada total</div><div class="val pos">${brl(r.ren)}</div><div class="det">Renda da casa no período</div></a>
     <div class="card" style="--c:var(--red)"><div class="lbl">🛒 Despesa total</div><div class="val neg">${brl(tot)}</div><div class="det">${pctTxt(tot,r.ren)} da renda${metaTotalMes('pessoal')?` · meta ${brl(metaTotalMes('pessoal')*(mes?1:12))}`:''}</div></div>
-    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Entrada − despesas${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></div>
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">${brl(r.ren)} − ${brl(r.pes)} despesas${r.divC?` − ${brl(r.divC)} pagos em dívidas`:''}</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">✅ Pago</div><div class="val">${brl(pago)}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">⏳ A pagar</div><div class="val">${brl(tot-pago)}</div></div>
   </div>`;
@@ -531,7 +536,7 @@ function lista(g,tipo){
   ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':STATUS_TXT[status(l)]}</button></td><td class="n"><button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
   </tbody></table>`:'<div class="empty">Nenhum lançamento neste período.</div>'}</div>
   ${g==='entrada'?painelClientes():''}
-  ${g==='divida'?cardsDividas(tipo)+painelDividas(tipo):''}`;
+  ${g==='divida'?avisoSemDivida(tipo)+cardsDividas(tipo)+painelDividas(tipo):''}`;
 }
 
 // ---------- clientes (mensalidades) ----------
@@ -584,7 +589,8 @@ function opcoesCat(g,sel){
     +(g==='divida'?'':`<option value="__nova">➕ Cadastrar ${g==='entrada'?'novo cliente':g==='divida'?'nova dívida':'nova categoria'}…</option>`);
 }
 function opcoesDiv(tipo,sel){
-  return `<option value="">— Sem dívida específica —</option>`+dividas().filter(d=>tipoDiv(d)===tipo).map(d=>`<option value="${d.id}" ${d.id===sel?'selected':''}>${esc(d.nome)}</option>`).join('')+`<option value="__nova">➕ Cadastrar nova dívida…</option>`;
+  const tem=dividas().some(d=>tipoDiv(d)===tipo);
+  return `<option value="">${tem?'— qual dívida este pagamento abate? —':'— cadastre a dívida abaixo —'}</option>`+dividas().filter(d=>tipoDiv(d)===tipo).map(d=>`<option value="${d.id}" ${d.id===sel?'selected':''}>${esc(d.nome)}</option>`).join('')+`<option value="__nova">➕ Cadastrar nova dívida…</option>`;
 }
 function novaDivida(tipo,mesForm){
   const nome=(prompt('Nome da nova dívida de '+TIPOS_DIV[tipo]+' (ex.: Carro)')||'').trim();if(!nome)return null;
@@ -598,7 +604,7 @@ function form(g,l,pre){
   const isRec=g==='entrada'||g==='renda';
   frm.innerHTML=`<h3>${novo?'Novo':'Editar'} — ${G.nome}</h3>
   <label class="f">${g==='entrada'?'Cliente':'Categoria'}<select name="cat">${opcoesCat(g,l.cat)}</select></label>
-  ${g==='divida'?`<label class="f">Dívida<select name="div">${opcoesDiv(tipoLanc(l),l.div)}</select></label>`:''}
+  ${g==='divida'?`<label class="f">Dívida que este pagamento abate<select name="div" required>${opcoesDiv(tipoLanc(l),l.div)}</select></label>`:''}
   <label class="f">Descrição<input name="desc" value="${esc(l.desc)}" placeholder="${g==='entrada'?'Ex.: Cliente Fulano — mensalidade':'Opcional'}"></label>
   <div class="row"><label class="f" style="flex:1">Valor (R$)<input name="valor" inputmode="decimal" required value="${l.valor===''?'':String(l.valor).replace('.',',')}" placeholder="0,00"></label>
   <label class="f" style="flex:1">Mês de competência<input type="month" name="mes" required value="${l.mes}"></label></div>
