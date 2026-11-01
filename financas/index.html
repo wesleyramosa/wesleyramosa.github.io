@@ -422,7 +422,7 @@ function cardsDividas(filtro){
   GRUPOS_ABERTO.forEach(g=>{
     const v=soma(virou.filter(l=>l.grupo===g));if(!v)return;
     const prox=soma(emAberto(fim).filter(l=>l.grupo===g));
-    linhas.push({antes:v,depois:prox,html:`<a class="card" href="#${g}" style="--c:var(--red)"><div class="lbl">${GRUPOS[g].icone} ${g==='imposto'?'Impostos':'Contador'} não pagos</div><div class="val neg">${brl(v)}</div><div class="det">Viraram dívida automaticamente</div><div class="det">Abata no quadro abaixo</div></a>`});
+    linhas.push({antes:v,depois:prox,html:`<a class="card" href="#${g}" style="--c:var(--red)"><div class="lbl">${GRUPOS[g].icone} ${g==='imposto'?'Impostos não pagos':'Contador não pago'}</div><div class="val neg">${brl(v)}</div><div class="det">Virou dívida automaticamente</div><div class="det">Abata no quadro abaixo</div></a>`});
   });
   const totA=linhas.reduce((s,x)=>s+x.antes,0),totD=linhas.reduce((s,x)=>s+x.depois,0);
   return `<div class="cards">${linhas.map(x=>x.html).join('')}
