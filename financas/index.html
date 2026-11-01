@@ -444,6 +444,7 @@ function card(g,v,det){const G=GRUPOS[g];return `<a class="card" href="#${g}" st
 const pctTxt=(a,b)=>b?(a/b*100).toFixed(0)+'%':'—';
 function pendTxt(g){const p=de(g).filter(l=>!l.pago);return p.length?`${p.length} pendente(s)`:'tudo pago'}
 // metas mensais por categoria (config.metas[grupo][categoria]); no "ano todo" vale meta × 12
+const catsAbertas=new Set();
 const metasDe=g=>{const m=db.config.metas||(db.config.metas={});return m[g]||(m[g]={})};
 const metaTotalMes=g=>Object.values(metasDe(g)).reduce((s,v)=>s+(+v||0),0);
 function painelCategorias(g){
@@ -453,20 +454,24 @@ function painelCategorias(g){
   const linha=c=>{
     const v=por[c]||0,m=(+metas[c]||0)*mult,dif=m-v,pct=m?v/m*100:(v?100:0);
     const cor=!m?'var(--muted)':pct>100?'var(--red)':pct>=85?'var(--amber)':'var(--green)';
-    return `<tr><td>${esc(c)}</td>
+    const dela=ls.filter(l=>l.cat===c).sort((a,b)=>(b.venc||b.mes).localeCompare(a.venc||a.mes)),aberta=catsAbertas.has(g+'|'+c);
+    return `<tr><td><a href="javascript:void 0" data-abrir-cat="${g}|${esc(c)}" style="color:var(--ink);text-decoration:none">${dela.length?(aberta?'▾':'▸'):'<span style="opacity:.3">▸</span>'} ${esc(c)}</a>${dela.length?` <small style="color:var(--muted)">(${dela.length})</small>`:''}</td>
     <td class="n"><input class="in" data-meta="${g}|${esc(c)}" value="${metas[c]?String(metas[c]).replace('.',','):''}" placeholder="—" inputmode="decimal" style="width:100px;text-align:right;padding:5px 8px"></td>
     <td class="n">${v?brl(v):'<span style="color:var(--muted)">—</span>'}</td>
     <td style="min-width:110px"><div class="bar" style="margin:0"><i style="width:${Math.min(100,pct)}%;background:${cor}"></i></div></td>
     <td class="n" style="color:${m?(dif<0?'var(--red)':'var(--green)'):'var(--muted)'}">${m?(dif<0?'estourou '+brl(-dif):'sobra '+brl(dif)):'—'}</td>
     <td class="n">${pctRenda(v)}</td>
-    <td class="n"><button class="btn sec sm" data-novo="${g}" data-cat="${esc(c)}">+ Lançar</button></td></tr>`;
+    <td class="n" style="white-space:nowrap"><input class="in" data-rapido="${g}|${esc(c)}" placeholder="+ valor" inputmode="decimal" title="Digite o valor e aperte Enter" style="width:96px;text-align:right;padding:5px 8px"><button class="icon" data-novo="${g}" data-cat="${esc(c)}" title="Lançamento completo (descrição, data, vencimento)">⋯</button></td></tr>
+    ${aberta?dela.map(l=>`<tr style="background:var(--bg)"><td style="padding-left:28px;color:var(--muted)">${fmtData(l.venc)||MESES[+l.mes.slice(5)-1]+'/'+l.mes.slice(2,4)}</td><td colspan="2">${esc(l.desc||'—')}</td><td class="n">${brl(+l.valor)}</td>
+      <td><button class="pill ${status(l)}" data-pay="${l.id}">${STATUS_TXT[status(l)]}</button></td><td></td>
+      <td class="n"><button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join(''):''}`;
   };
   const metaTot=metaTotalMes(g)*mult,difTot=metaTot-tot;
   const ant=mes?(mes===1?mk(ano-1,12):mk(ano,mes-1)):null;
   return `<div class="panel scroll"><div class="row"><h3 style="margin:0">Metas × gasto real — ${nomePer()}</h3><span class="spacer"></span>
     ${ant?`<button class="btn sec sm" data-copiar-metas="${g}|${ant}">Usar o gasto de ${MESES[+ant.slice(5)-1]}/${ant.slice(0,4)} como meta</button>`:''}</div>
-  <p class="sub" style="margin:6px 0 10px">Meta mensal de cada categoria (digite e saia do campo para salvar)${mes?'':' · no ano todo a meta é × 12'}. A % é sobre a renda da casa no período (${brl(renda)}).</p>
-  <table><thead><tr><th>Categoria</th><th class="n">Meta/mês</th><th class="n">Real</th><th></th><th class="n">Diferença</th><th class="n">% da renda</th><th></th></tr></thead><tbody>
+  <p class="sub" style="margin:6px 0 10px">Clique na categoria para ver os lançamentos dela. Em "Lançar", digite o valor e aperte <b>Enter</b>. Meta mensal: digite e saia do campo para salvar${mes?'':' · no ano todo a meta é × 12'}. A % é sobre a renda da casa no período (${brl(renda)}).</p>
+  <table><thead><tr><th>Categoria</th><th class="n">Meta/mês</th><th class="n">Real</th><th></th><th class="n">Diferença</th><th class="n">% da renda</th><th class="n">Lançar</th></tr></thead><tbody>
   ${catsDe(g).map(linha).join('')}
   <tr class="tot"><td><b>Total</b></td><td class="n"><b>${metaTot?brl(metaTot):'—'}</b></td><td class="n"><b>${brl(tot)}</b></td>
     <td><div class="bar" style="margin:0"><i style="width:${metaTot?Math.min(100,tot/metaTot*100):0}%;background:${metaTot&&tot>metaTot?'var(--red)':'var(--green)'}"></i></div></td>
@@ -522,7 +527,7 @@ function lista(g,tipo){
     <div class="card" style="--c:var(--amber)"><div class="lbl">${isRec?'A receber':'A pagar'}</div><div class="val">${brl(tot-pago)}</div></div>
   </div>
   ${g==='pessoal'?painelCategorias('pessoal'):''}
-  <div class="panel scroll">${ls.length?`<table><thead><tr><th>Mês</th><th>Categoria</th><th>Descrição</th><th>Vencimento</th><th class="n">Valor</th><th>Status</th><th></th></tr></thead><tbody>
+  <div class="panel scroll" ${g==='pessoal'?'hidden':''}>${ls.length?`<table><thead><tr><th>Mês</th><th>Categoria</th><th>Descrição</th><th>Vencimento</th><th class="n">Valor</th><th>Status</th><th></th></tr></thead><tbody>
   ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':STATUS_TXT[status(l)]}</button></td><td class="n"><button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
   </tbody></table>`:'<div class="empty">Nenhum lançamento neste período.</div>'}</div>
   ${g==='entrada'?painelClientes():''}
@@ -862,6 +867,15 @@ function importar(){
 }
 
 // ---------- ações ----------
+app.addEventListener('keydown',e=>{
+  const t=e.target.closest('[data-rapido]');if(!t||e.key!=='Enter')return;
+  e.preventDefault();const v=parseValor(t.value);if(isNaN(v)||v<=0){toast('Digite um valor, ex.: 45,90');return}
+  const [g,cat]=t.dataset.rapido.split(/\|(.*)/s);
+  const m=mes||hoje.getMonth()+1,mm=mk(ano,m),hj=hoje.toISOString().slice(0,10);
+  db.lancs.push({id:uid(),grupo:g,cat,desc:'',valor:v,mes:mm,venc:hj.startsWith(mm)?hj:mm+'-01',pago:true});
+  catsAbertas.add(g+'|'+cat);save();render();toast(`${brl(v)} lançado em ${cat}`);
+  const prox=app.querySelector(`[data-rapido="${CSS.escape(t.dataset.rapido)}"]`);if(prox)prox.focus();
+});
 app.addEventListener('change',e=>{
   const t=e.target.closest('[data-meta]');if(!t)return;
   const [g,c]=t.dataset.meta.split(/\|(.*)/s);const v=parseValor(t.value);
@@ -869,6 +883,7 @@ app.addEventListener('change',e=>{
   save();render();toast('Meta salva');
 });
 app.addEventListener('click',e=>{
+  const ac=e.target.closest('[data-abrir-cat]');if(ac){const k=ac.dataset.abrirCat;catsAbertas.has(k)?catsAbertas.delete(k):catsAbertas.add(k);render();return}
   const cm=e.target.closest('[data-copiar-metas]');
   if(cm){const [g,mm]=cm.dataset.copiarMetas.split('|');const por={};db.lancs.filter(l=>l.grupo===g&&l.mes===mm).forEach(l=>por[l.cat]=(por[l.cat]||0)+(+l.valor||0));
     if(!Object.keys(por).length){toast('Não há gastos nesse mês para copiar');return}
