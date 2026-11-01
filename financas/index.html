@@ -314,7 +314,9 @@ const empSemProlabore=l=>l.cat!=='Pró-labore';
 function resumo(f){
   const ent=soma(de('entrada',f)),cont=soma(de('contador',f)),imp=soma(de('imposto',f)),emp=soma(de('empresa',f)),divE=soma(de('divida',f).filter(l=>l.pago&&tipoLanc(l)==='empresa')),divC=soma(de('divida',f).filter(l=>l.pago&&tipoLanc(l)==='casa')),divCPend=soma(de('divida',f).filter(l=>!l.pago&&tipoLanc(l)==='casa'));
   const ren=soma(de('renda',f)),pes=soma(de('pessoal',f)),rep=soma(de('renda',f).filter(ehRepasse)),empOutras=soma(de('empresa',f).filter(empSemProlabore));
-  return {ent,cont,imp,emp,empOutras,divE,divC,divCPend,ren,rep,pes,resEmp:ent-rep-cont-imp-empOutras-divE,resCasa:ren-pes-divC};
+  const pg=ls=>soma(ls.filter(l=>l.pago));
+  const caixaEmp=pg(de('entrada',f))-pg(de('renda',f).filter(ehRepasse))-pg(de('contador',f))-pg(de('imposto',f))-pg(de('empresa',f).filter(empSemProlabore))-divE;
+  return {caixaEmp,ent,cont,imp,emp,empOutras,divE,divC,divCPend,ren,rep,pes,resEmp:ent-rep-cont-imp-empOutras-divE,resCasa:ren-pes-divC};
 }
 const GRUPOS_EMPRESA=['contador','imposto','empresa'];
 const ehDaEmpresa=l=>GRUPOS_EMPRESA.includes(l.grupo)||(l.grupo==='divida'&&tipoLanc(l)==='empresa');
@@ -342,11 +344,11 @@ function painel(){
     ${cardTipoDiv('empresa')}
   </div>
   <div class="cards c5">
-    <a class="card" href="#anual" style="--c:var(--amber)"><div class="lbl">🏢 Resultado da empresa</div><div class="val ${r.resEmp<0?'neg':'pos'}">${brl(r.resEmp)}</div><div class="det">Entradas − para a casa − contador − impostos${r.divE?' − dívidas':''}${r.empOutras?' − outras saídas':''}</div></a>
+    ${cardSaldoEmpresa()}
+    <a class="card" href="#anual" style="--c:var(--amber)"><div class="lbl">🏢 Resultado do mês</div><div class="val ${r.resEmp<0?'neg':'pos'}">${brl(r.resEmp)}</div><div class="det">Entradas − para a casa − contador − impostos${r.divE?' − dívidas':''}${r.empOutras?' − outras saídas':''}</div></a>
     <div class="card" style="--c:var(--green)"><div class="lbl">🎯 Meta de faturamento</div><div class="val">${pctMeta.toFixed(0)}%</div><div class="bar"><i style="width:${pctMeta}%;background:${pctMeta>=100?'var(--green)':'var(--amber)'}"></i></div><div class="det">${brl(r.ent)} de ${brl(meta)}</div></div>
     <a class="card" href="#entrada" style="--c:var(--green)"><div class="lbl">📥 A receber</div><div class="val">${brl(soma(aReceber))}</div><div class="det">${aReceber.length} mensalidade(s) em aberto</div></a>
     <a class="card" href="#${pend[0]?.grupo||'painel'}" style="--c:var(--red)"><div class="lbl">⏰ Contas pendentes</div><div class="val">${brl(soma(pend))}</div><div class="det">${pend.length} conta(s) da empresa em aberto</div></a>
-    ${card('empresa',r.empOutras,'Fora o pró-labore')}
   </div>
   <div class="grid2">
     <div class="panel"><h3>Entradas × saídas da empresa — ${ano}</h3><div class="chartbox"><canvas id="ch1"></canvas></div></div>
@@ -517,17 +519,23 @@ function graficoAno(a){
 // config.saldoInicial[mes] é um valor digitado à mão e recomeça a conta a partir dele.
 const ehCasa=l=>l.grupo==='renda'||l.grupo==='pessoal'||(l.grupo==='divida'&&tipoLanc(l)==='casa');
 const mesSeguinte=mm=>{const [a,m]=mm.split('-').map(Number);return m===12?mk(a+1,1):mk(a,m+1)};
-function saldoTrazido(mm){
-  const man=db.config.saldoInicial||{};
+const ehDoCaixaEmp=l=>['entrada','contador','imposto','empresa'].includes(l.grupo)||ehRepasse(l)||(l.grupo==='divida'&&tipoLanc(l)==='empresa');
+function saldoAcumulado(mm,man,filtro,resultado){
   if(man[mm]!=null)return man[mm];
-  const meses=db.lancs.filter(ehCasa).map(l=>l.mes).concat(Object.keys(man)).sort();
+  const meses=db.lancs.filter(filtro).map(l=>l.mes).concat(Object.keys(man)).sort();
   if(!meses.length||meses[0]>=mm)return 0;
   let v=0;
   for(let c=meses[0];c<mm;c=mesSeguinte(c)){
     if(man[c]!=null)v=man[c];
-    v+=resumo(l=>l.mes===c).resCasa;
+    v+=resultado(resumo(l=>l.mes===c));
   }
   return Math.round(v*100)/100;
+}
+const saldoTrazido=mm=>saldoAcumulado(mm,db.config.saldoInicial||{},ehCasa,r=>r.resCasa);
+const saldoTrazidoEmp=mm=>saldoAcumulado(mm,db.config.saldoInicialEmp||{},ehDoCaixaEmp,r=>r.caixaEmp);
+function cardSaldoEmpresa(){
+  const mm=inicioDoPeriodo(),ant=saldoTrazidoEmp(mm),r=resumo(doPeriodo),v=ant+r.caixaEmp;
+  return `<div class="card" style="--c:var(--blue)"><div class="lbl">🏦 Saldo da empresa</div><div class="val ${v<0?'neg':'pos'}">${brl(v)}</div><div class="det">${nomeAnterior()}: ${brl(ant)} · só o recebido e o pago · <button class="icon" style="padding:0" data-saldo-ini="${mm}" data-saldo-tipo="emp" title="Ajustar o saldo trazido">✏️ ajustar</button></div></div>`;
 }
 const nomeAnterior=()=>{if(!mes)return String(ano-1);return MESES_L[mes===1?11:mes-2]};
 function cardsSaldoRenda(tot,pago){
@@ -570,6 +578,7 @@ function lista(g,tipo){
     <div class="card" style="--c:${G.cor}"><div class="lbl">Total no período</div><div class="val">${brl(tot)}</div><div class="det">${ls.length} lançamento(s)</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">${isRec?'Recebido':'Pago'}</div><div class="val pos">${brl(pago)}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">${isRec?'A receber':'A pagar'}</div><div class="val">${brl(tot-pago)}</div>${GRUPOS_ABERTO.includes(g)?'<div class="det">deste período</div>':''}</div>
+    ${g==='entrada'?cardSaldoEmpresa():''}
     ${GRUPOS_ABERTO.includes(g)?`<div class="card" style="--c:var(--red)"><div class="lbl">💳 Em aberto (acumulado)</div><div class="val neg">${brl(soma(emAberto(fimDoPeriodo()).filter(l=>l.grupo===g)))}</div><div class="det">fica como dívida até você pagar ou abater</div></div>`:''}
   </div>
   ${g==='pessoal'?painelCategorias('pessoal'):''}
@@ -941,9 +950,9 @@ app.addEventListener('click',e=>{
     else{l.valor=Math.round((+l.valor-v)*100)/100;db.lancs.push({...l,id:uid(),valor:v,pago:true,pagoEm:hj,desc:(l.desc?l.desc+' — ':'')+'abatimento'});toast(`Abatido ${brl(v)} · em aberto ${brl(l.valor)}`)}
     save();render();return}
   const si=e.target.closest('[data-saldo-ini]');
-  if(si){const mm=si.dataset.saldoIni,atual=saldoTrazido(mm);
+  if(si){const mm=si.dataset.saldoIni,ehEmp=si.dataset.saldoTipo==='emp',chave=ehEmp?'saldoInicialEmp':'saldoInicial',atual=ehEmp?saldoTrazidoEmp(mm):saldoTrazido(mm);
     const r=prompt('Saldo que veio do mês anterior (R$). Deixe em branco para o app calcular sozinho.',String(atual).replace('.',','));
-    if(r===null)return;const m=db.config.saldoInicial||(db.config.saldoInicial={});
+    if(r===null)return;const m=db.config[chave]||(db.config[chave]={});
     if(!r.trim())delete m[mm];else{const v=parseValor(r);if(isNaN(v)){toast('Valor inválido');return}m[mm]=v}
     save();render();toast('Saldo atualizado');return}
   const cm=e.target.closest('[data-copiar-metas]');
