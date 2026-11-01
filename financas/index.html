@@ -499,13 +499,24 @@ function graficoAno(a){
 }
 
 // ---------- listas ----------
+function cardsSaldoCasa(tot,pago){
+  const r=resumo(doPeriodo);
+  return `<div class="cards c5">
+    <a class="card" href="#renda" style="--c:var(--green)"><div class="lbl">💰 Entrada total</div><div class="val pos">${brl(r.ren)}</div><div class="det">Renda da casa no período</div></a>
+    <div class="card" style="--c:var(--red)"><div class="lbl">🛒 Despesa total</div><div class="val neg">${brl(tot)}</div><div class="det">${pctTxt(tot,r.ren)} da renda${metaTotalMes('pessoal')?` · meta ${brl(metaTotalMes('pessoal')*(mes?1:12))}`:''}</div></div>
+    <div class="card" style="--c:var(--brand2)"><div class="lbl">⚖️ Saldo</div><div class="val ${r.resCasa<0?'neg':'pos'}">${brl(r.resCasa)}</div><div class="det">Entrada − despesas${r.divC?` − dívidas (${brl(r.divC)})`:''}</div></div>
+    <div class="card" style="--c:var(--green)"><div class="lbl">✅ Pago</div><div class="val">${brl(pago)}</div></div>
+    <div class="card" style="--c:var(--amber)"><div class="lbl">⏳ A pagar</div><div class="val">${brl(tot-pago)}</div></div>
+  </div>`;
+}
 function lista(g,tipo){
   const G=GRUPOS[g];const per=nomePer();
   const ls=de(g).filter(l=>!tipo||tipoLanc(l)===tipo).sort((a,b)=>b.mes.localeCompare(a.mes)||(a.venc||'').localeCompare(b.venc||''));
   const tot=soma(ls),pago=soma(ls.filter(l=>l.pago));
   const isRec=g==='entrada'||g==='renda';
   app.innerHTML=`<div class="row"><div><h2>${G.icone} ${tipo?`Dívidas da ${tipo}`:G.nome}</h2><p class="sub">${tipo?(tipo==='casa'?'Dívidas da casa — o que você paga sai do saldo da casa':'Dívidas da empresa — separadas das contas mensais'):G.desc} · ${per}</p></div><span class="spacer"></span><button class="btn" data-novo="${g}" data-tipo="${tipo||''}">+ Novo lançamento</button></div>
-  <div class="cards">
+  ${g==='pessoal'?cardsSaldoCasa(tot,pago):''}
+  <div class="cards" ${g==='pessoal'?'hidden':''}>
     <div class="card" style="--c:${G.cor}"><div class="lbl">Total no período</div><div class="val">${brl(tot)}</div><div class="det">${ls.length} lançamento(s)</div></div>
     <div class="card" style="--c:var(--green)"><div class="lbl">${isRec?'Recebido':'Pago'}</div><div class="val pos">${brl(pago)}</div></div>
     <div class="card" style="--c:var(--amber)"><div class="lbl">${isRec?'A receber':'A pagar'}</div><div class="val">${brl(tot-pago)}</div></div>
