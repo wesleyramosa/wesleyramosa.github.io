@@ -391,21 +391,24 @@ function painelCasa(){
 }
 const GRUPOS_ABERTO=['imposto','contador'];
 const emAberto=(ate)=>db.lancs.filter(l=>GRUPOS_ABERTO.includes(l.grupo)&&!l.pago&&l.mes<=ate);
+const mesAtual=()=>mk(hoje.getFullYear(),hoje.getMonth()+1);
+const virouDivida=()=>{const fim=fimDoPeriodo(),lim=fim>mesAtual()?fim:mesAtual();return emAberto(fim).filter(l=>l.mes<lim)};
 function cardTipoDiv(tipo){
   const ini=inicioDoPeriodo(),fim=fimDoPeriodo();
   const ds=dividas().filter(d=>tipoDiv(d)===tipo&&d.inicio<=fim);
   // na empresa, impostos e contador não pagos até o fim do período também são dívida
-  const abertos=tipo==='empresa'?soma(emAberto(fim)):0;
-  const antes=ds.reduce((s,d)=>s+saldoAntes(d,ini),0)+abertos,noPer=ds.reduce((s,d)=>s+abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),0),depois=antes-noPer;
+  const abertos=tipo==='empresa'?soma(virouDivida()):0,proxAbertos=tipo==='empresa'?soma(emAberto(fim)):0;
+  const antes=ds.reduce((s,d)=>s+saldoAntes(d,ini),0)+abertos,noPer=ds.reduce((s,d)=>s+abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),0),depois=antes-abertos-noPer+proxAbertos;
   const total=ds.reduce((s,d)=>s+d.valor,0),pct=total?Math.min(100,(total-depois)/total*100):0;
   const prox=mes&&mes<12?`${MESES[mes]}/${ano}`:`Jan/${ano+1}`;
   return `<a class="card" href="#${tipo==='casa'?'dividacasa':'divida'}" style="--c:var(--red)"><div class="lbl">💳 Dívidas da ${tipo}</div>
-    <div class="val ${antes?'neg':''}">${brl(antes)}</div><div class="det">${ds.length?`${ds.length} dívida(s)`:''}${ds.length&&abertos?' + ':''}${abertos?`${brl(abertos)} de impostos/contador em aberto`:''}${!ds.length&&!abertos?'Nenhuma dívida':''}</div>
-    ${ds.length||abertos?`<div class="bar"><i style="width:${pct}%"></i></div><div class="det">${noPer?`Abatido <b class="pos">${brl(noPer)}</b> · `:''}${prox} começa com <b>${brl(depois)}</b></div>`:''}</a>`;
+    <div class="val ${antes?'neg':''}">${brl(antes)}</div><div class="det">${ds.length?`${ds.length} dívida(s)`:''}${ds.length&&abertos?' + ':''}${abertos?`${brl(abertos)} de impostos/contador não pagos`:''}${!ds.length&&!abertos?'Nenhuma dívida':''}</div>
+    ${ds.length||proxAbertos?`<div class="bar"><i style="width:${pct}%"></i></div><div class="det">${noPer?`Abatido <b class="pos">${brl(noPer)}</b> · `:''}${prox} começa com <b>${brl(depois)}</b></div>`:''}</a>`;
 }
 function cardsDividas(filtro){
   const ds=dividas().filter(d=>!filtro||tipoDiv(d)===filtro).filter(d=>d.inicio<=fimDoPeriodo());
-  if(!ds.length)return filtro?'':`<div class="row" style="margin:-4px 0 18px"><span class="sub" style="margin:0">Sem dívidas cadastradas.</span><button class="btn sec sm" data-div-novo="empresa">+ Dívida</button></div>`;
+  const virou=filtro==='empresa'?virouDivida():[];
+  if(!ds.length&&!virou.length)return filtro?'':`<div class="row" style="margin:-4px 0 18px"><span class="sub" style="margin:0">Sem dívidas cadastradas.</span><button class="btn sec sm" data-div-novo="empresa">+ Dívida</button></div>`;
   const ini=inicioDoPeriodo(),fim=fimDoPeriodo();
   const linhas=ds.map(d=>{
     const antes=saldoAntes(d,ini),noPer=abat(d,l=>l.mes>=ini&&l.mes<=fim&&l.mes>=d.inicio),depois=antes-noPer;
@@ -416,9 +419,21 @@ function cardsDividas(filtro){
       <div class="bar"><i style="width:${pctPago}%"></i></div>
       <div class="det">${noPer?`Abatido: <b class="pos">${brl(noPer)}</b> · `:'Nada abatido ainda · '}${prox} começa com <b>${brl(depois)}</b></div></a>`};
   });
+  GRUPOS_ABERTO.forEach(g=>{
+    const v=soma(virou.filter(l=>l.grupo===g));if(!v)return;
+    const prox=soma(emAberto(fim).filter(l=>l.grupo===g));
+    linhas.push({antes:v,depois:prox,html:`<a class="card" href="#${g}" style="--c:var(--red)"><div class="lbl">${GRUPOS[g].icone} ${g==='imposto'?'Impostos':'Contador'} não pagos</div><div class="val neg">${brl(v)}</div><div class="det">Viraram dívida automaticamente</div><div class="det">Abata no quadro abaixo</div></a>`});
+  });
   const totA=linhas.reduce((s,x)=>s+x.antes,0),totD=linhas.reduce((s,x)=>s+x.depois,0);
   return `<div class="cards">${linhas.map(x=>x.html).join('')}
     ${linhas.length>1?`<div class="card" style="--c:var(--red)"><div class="lbl">💳 Total de dívidas</div><div class="val neg">${brl(totA)}</div><div class="det">Início ${mes?`de ${MESES[mes-1]}`:'do ano'} → fim: <b>${brl(totD)}</b></div></div>`:''}</div>`;
+}
+function painelVirouDivida(){
+  const ls=virouDivida().sort((a,b)=>a.mes.localeCompare(b.mes));
+  if(!ls.length)return '';
+  return `<div class="panel scroll"><h3>🏛️ Impostos e contador que viraram dívida — ${brl(soma(ls))}</h3><table><thead><tr><th>Mês</th><th>Conta</th><th>Categoria</th><th>Descrição</th><th class="n">Em aberto</th><th></th></tr></thead><tbody>
+  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${GRUPOS[l.grupo].nome}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td class="n neg">${brl(+l.valor)}</td><td class="n"><button class="btn sm" data-abater-lanc="${l.id}">Abater</button></td></tr>`).join('')}
+  </tbody></table></div>`;
 }
 function avisoSemDivida(tipo){
   const sem=db.lancs.filter(l=>l.grupo==='divida'&&!l.div&&tipoLanc(l)===tipo);
@@ -583,11 +598,11 @@ function lista(g,tipo){
   </div>
   ${g==='pessoal'?painelCategorias('pessoal'):''}
   <div class="panel scroll" ${g==='pessoal'?'hidden':''}>${ls.length?`<table><thead><tr><th>Mês</th><th>Categoria</th><th>Descrição</th><th>Vencimento</th><th class="n">Valor</th><th>Status</th><th></th></tr></thead><tbody>
-  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':STATUS_TXT[status(l)]}</button></td><td class="n">${GRUPOS_ABERTO.includes(g)&&!l.pago?`<button class="btn sm" data-abater-lanc="${l.id}">Abater</button> `:''}<button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
+  ${ls.map(l=>`<tr><td>${MESES[+l.mes.slice(5)-1]}/${l.mes.slice(2,4)}</td><td>${esc(l.cat)}</td><td>${esc(l.desc)}</td><td>${fmtData(l.venc)}</td><td class="n">${brl(+l.valor)}</td><td><button class="pill ${status(l)}" data-pay="${l.id}" title="Clique para alternar">${isRec&&l.pago?'Recebido':GRUPOS_ABERTO.includes(g)&&!l.pago&&l.mes<mesAtual()?'Virou dívida':STATUS_TXT[status(l)]}</button></td><td class="n">${GRUPOS_ABERTO.includes(g)&&!l.pago?`<button class="btn sm" data-abater-lanc="${l.id}">Abater</button> `:''}<button class="icon" data-ed="${l.id}" title="Editar">✏️</button><button class="icon" data-dup="${l.id}" title="Repetir no próximo mês">⧉</button><button class="icon" data-del="${l.id}" title="Excluir">🗑️</button></td></tr>`).join('')}
   </tbody></table>`:'<div class="empty">Nenhum lançamento neste período.</div>'}</div>
   ${g==='entrada'?painelClientes():''}
   ${GRUPOS_ABERTO.includes(g)?abertosAnteriores(g):''}
-  ${g==='divida'?avisoSemDivida(tipo)+cardsDividas(tipo)+painelDividas(tipo):''}`;
+  ${g==='divida'?avisoSemDivida(tipo)+cardsDividas(tipo)+(tipo==='empresa'?painelVirouDivida():'')+painelDividas(tipo):''}`;
 }
 
 // ---------- clientes (mensalidades) ----------
