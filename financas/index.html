@@ -194,16 +194,35 @@ function agendarEnvio(){
 async function enviar(){
   if(enviando){envioTimer=setTimeout(enviar,500);return}
   enviando=true;pendente=false;
-  try{await api('/dados',{method:'PUT',body:JSON.stringify(db)});if(!pendente)nuvem('☁️ Salvo')}
+  try{
+    const r=await api('/dados',{method:'PUT',body:JSON.stringify({...db,base:baseNuvem})});
+    baseNuvem=r.atualizado;
+    if(r.dados){db={lancs:r.dados.lancs,config:r.dados.config||db.config};localStorage.setItem(KEY,JSON.stringify(db));if(!dlg.open)render();toast('📲 Chegaram lançamentos do Telegram')}
+    if(!pendente)nuvem('☁️ Salvo');
+  }
   catch(e){if(logado){pendente=true;nuvem('⚠️ Sem conexão — tentando de novo',true);clearTimeout(envioTimer);envioTimer=setTimeout(enviar,8000)}}
   enviando=false;
 }
 window.addEventListener('beforeunload',e=>{if(pendente){e.preventDefault();e.returnValue=''}});
+// versão da nuvem que este aparelho conhece; o servidor usa para juntar o que o bot do Telegram gravou
+let baseNuvem='';
+async function atualizarDaNuvem(){
+  const foco=document.activeElement;
+  if(!logado||pendente||enviando||dlg.open||document.hidden||(foco&&/INPUT|SELECT|TEXTAREA/.test(foco.tagName)))return;
+  try{const d=await api('/dados');
+    if(d&&Array.isArray(d.lancs)&&d.atualizado&&d.atualizado!==baseNuvem&&!pendente){
+      const novos=d.lancs.filter(l=>!db.lancs.some(x=>x.id===l.id)).length;
+      db={lancs:d.lancs,config:d.config||{}};baseNuvem=d.atualizado;localStorage.setItem(KEY,JSON.stringify(db));render();
+      if(novos)toast(`📲 ${novos} lançamento(s) novo(s)`);
+    }}catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)atualizarDaNuvem()});
+setInterval(atualizarDaNuvem,30000);
 async function entrar(){
   logado=true;document.body.classList.remove('deslogado');bSair.hidden=false;nuvem('Carregando…');
   try{
     const d=await api('/dados');
-    if(d&&Array.isArray(d.lancs)){db={lancs:d.lancs,config:d.config||{}};localStorage.setItem(KEY,JSON.stringify(db));nuvem('☁️ Salvo')}
+    if(d&&Array.isArray(d.lancs)){db={lancs:d.lancs,config:d.config||{}};baseNuvem=d.atualizado||'';localStorage.setItem(KEY,JSON.stringify(db));nuvem('☁️ Salvo')}
     else if(db.lancs.length||clientes().length||dividas().length){await enviar();toast('Seus dados deste navegador foram enviados para a nuvem')} // 1º acesso: sobe o que já existia
     else nuvem('☁️ Salvo');
   }catch(e){if(!logado)return;nuvem('⚠️ Sem conexão — mostrando a cópia deste aparelho',true)}
@@ -639,6 +658,7 @@ function backup(){
     <button class="btn sec" id="bCsv">Exportar CSV (Excel)</button>
   </div><p class="sub" style="margin-top:10px">Importar <b>substitui</b> os dados atuais (também na nuvem). ${db.lancs.length} lançamento(s) salvos agora.</p></div>
   <div class="panel"><h3>Categorias que você criou</h3>${Object.entries(db.config.cats||{}).filter(([,v])=>v.length).map(([g,v])=>`<p style="margin:6px 0"><b>${GRUPOS[g]?.nome||g}:</b> ${v.map((c,i)=>`<span class="pill pend" style="margin:2px">${esc(c)} <button class="icon" style="padding:0 2px" data-cat-del="${g}|${i}" title="Remover">✕</button></span>`).join('')}</p>`).join('')||'<p class="sub" style="margin:0">Nenhuma ainda. Para criar, escolha "➕ Cadastrar nova categoria…" no campo Categoria de qualquer lançamento.</p>'}</div>
+  <div class="panel"><h3>📲 Telegram — mandar foto da nota fiscal</h3><div id="tgBox" class="sub" style="margin:0">Verificando…</div></div>
   <div class="panel"><h3>O que a casa recebe da empresa</h3><p class="sub" style="margin:0 0 8px">As categorias marcadas da Renda da casa são descontadas do Resultado da empresa.</p>
     ${catsDe('renda').map(c=>`<label class="chk" style="margin-top:6px"><input type="checkbox" data-rde="${esc(c)}" ${rendaDaEmpresa().includes(c)?'checked':''}> ${esc(c)}</label>`).join('')}</div>
   <div class="panel"><h3>Metas</h3>
@@ -664,6 +684,18 @@ function backup(){
     }catch(e){toast('Arquivo inválido')}
   };
   app.querySelectorAll('[data-rde]').forEach(cb=>cb.onchange=()=>{db.config.rendaDaEmpresa=[...app.querySelectorAll('[data-rde]:checked')].map(x=>x.dataset.rde);save();toast('Salvo')});
+  (async()=>{
+    const box=document.getElementById('tgBox');
+    const pintar=(st,extra='')=>{if(!document.body.contains(box))return;
+      box.innerHTML=`${st.conectado?'<span class="pos">✅ Conectado.</span> Mande a foto da nota para o bot e a compra é lançada na hora.':st.token?'O bot está pronto. Clique para vincular o seu Telegram.':'Falta o token do bot. Crie o bot no @BotFather e rode no terminal: <code>npx wrangler secret put TELEGRAM_TOKEN</code> (na pasta financas-api).'}
+      <div class="row" style="margin-top:10px">${st.token?`<button class="btn sm" id="bTg">${st.conectado?'Gerar novo link de vínculo':'Conectar Telegram'}</button>`:''}${extra}</div>`;
+      const b=document.getElementById('bTg');if(b)b.onclick=async()=>{b.disabled=true;
+        try{const r=await api('/tg-conectar',{method:'POST'});if(r.erro)throw new Error(r.erro);
+          pintar(st,`<a class="btn" href="${esc(r.link)}" target="_blank" rel="noopener">Abrir @${esc(r.bot)} no Telegram e tocar em Iniciar</a><span class="sub" style="margin:0">O link vale 15 minutos.</span>`)}
+        catch(e){toast(e.message);b.disabled=false}};
+    };
+    try{pintar(await api('/tg-status'))}catch(e){box.textContent='Não consegui verificar o Telegram agora.'}
+  })();
   cSalvar.onclick=()=>{const n=s=>parseFloat(String(s).replace(/\./g,'').replace(',','.'))||0;db.config.metaFat=n(cMeta.value);db.config.metaPessoal=n(cTeto.value);save();toast('Metas salvas')};
   bZerar.onclick=()=>{if(confirm('Apagar TODOS os lançamentos (também na nuvem)? Exporte um backup antes.')){db={lancs:[],config:db.config};save();render()}};
 }
